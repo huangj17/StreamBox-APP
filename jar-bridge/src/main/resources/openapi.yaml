@@ -1,0 +1,303 @@
+openapi: 3.0.3
+info:
+  title: JAR Bridge Service API
+  description: |
+    JAR Bridge Service 为 StreamBox 提供 JAR 插件运行时环境。
+    所有 `/api/{key}` 端点与苹果 CMS 接口格式兼容，StreamBox 可将 Bridge 当作普通 CMS 源对待。
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:9978
+    description: 本地开发
+
+tags:
+  - name: 插件管理
+    description: 插件列表和健康检查
+  - name: CMS 兼容 API
+    description: 与苹果 CMS 格式兼容的内容接口
+  - name: 播放解析
+    description: 播放地址二次解析
+
+paths:
+  /health:
+    get:
+      tags: [插件管理]
+      summary: 健康检查
+      description: 返回服务状态、运行时长和各插件加载状态
+      responses:
+        "200":
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                uptime: "2h30m"
+                plugins:
+                  loaded: 2
+                  failed: 0
+                  details:
+                    - key: source_hd
+                      status: ok
+                      loadTime: "120ms"
+
+  /api/list:
+    get:
+      tags: [插件管理]
+      summary: 插件列表
+      description: 列出所有已加载的 JAR 插件，供 StreamBox 配置源管理使用
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListResponse"
+              example:
+                code: 200
+                sources:
+                  - key: source_hd
+                    name: "高清源"
+                    api: "/api/source_hd"
+
+  /api/{key}:
+    get:
+      tags: [CMS 兼容 API]
+      summary: CMS 兼容接口
+      description: |
+        根据查询参数调用不同的 Spider 方法：
+        - `ac=class` → 分类列表（homeContent）
+        - `ac=detail&ids=xxx` → 视频详情（detailContent）
+        - `t={tid}&pg={n}` → 分类视频列表（categoryContent）
+        - `wd={keyword}` → 搜索（searchContent）
+        - 无参数 → 首页内容（homeContent）
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: 插件唯一标识
+          schema:
+            type: string
+          example: test
+        - name: ac
+          in: query
+          required: false
+          description: "操作类型：class（分类列表）或 detail（视频详情）"
+          schema:
+            type: string
+            enum: [class, detail]
+        - name: ids
+          in: query
+          required: false
+          description: "视频 ID（ac=detail 时必传，逗号分隔）"
+          schema:
+            type: string
+          example: "12345"
+        - name: t
+          in: query
+          required: false
+          description: 分类 ID
+          schema:
+            type: string
+          example: "1"
+        - name: pg
+          in: query
+          required: false
+          description: 页码（默认 1）
+          schema:
+            type: string
+            default: "1"
+        - name: wd
+          in: query
+          required: false
+          description: 搜索关键词
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功（返回 Spider JSON，格式取决于调用的方法）
+          content:
+            application/json:
+              schema:
+                type: object
+              examples:
+                分类列表:
+                  summary: ac=class
+                  value:
+                    class:
+                      - type_id: "1"
+                        type_name: "电影"
+                      - type_id: "2"
+                        type_name: "电视剧"
+                    list:
+                      - vod_id: "101"
+                        vod_name: "流浪地球2"
+                        vod_pic: "https://example.com/cover.jpg"
+                        vod_remarks: "1080P"
+                分类视频:
+                  summary: t=1&pg=1
+                  value:
+                    page: 1
+                    pagecount: 10
+                    total: 200
+                    list:
+                      - vod_id: "201"
+                        vod_name: "测试视频"
+                        vod_pic: "https://example.com/cover.jpg"
+                        vod_remarks: "HD"
+                视频详情:
+                  summary: ac=detail&ids=101
+                  value:
+                    list:
+                      - vod_id: 101
+                        vod_name: "流浪地球2"
+                        vod_pic: "https://example.com/cover.jpg"
+                        vod_content: "影片简介..."
+                        vod_play_from: "超清线路$$$蓝光线路"
+                        vod_play_url: "正片$https://xxx.m3u8$$$正片$https://yyy.m3u8"
+                        vod_year: "2023"
+                搜索结果:
+                  summary: wd=流浪
+                  value:
+                    list:
+                      - vod_id: "301"
+                        vod_name: "搜索结果-流浪"
+                        vod_pic: "https://example.com/search.jpg"
+                        vod_remarks: "HD"
+        "404":
+          description: 插件不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 插件内部错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "504":
+          description: 插件超时
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/{key}/play:
+    get:
+      tags: [播放解析]
+      summary: 播放地址二次解析
+      description: |
+        当视频详情中 `parse=1` 时，需要调用此接口获取真实播放地址。
+        返回的 `header` 字段需要透传给播放器（如 Referer、User-Agent）。
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: 插件唯一标识
+          schema:
+            type: string
+          example: test
+        - name: flag
+          in: query
+          required: true
+          description: 播放源标识（对应 vod_play_from 中的名称）
+          schema:
+            type: string
+          example: "超清线路"
+        - name: id
+          in: query
+          required: true
+          description: 原始播放地址或 ID
+          schema:
+            type: string
+          example: "https://example.com/raw.m3u8"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlayResponse"
+              example:
+                parse: 0
+                url: "https://real-play-url.m3u8"
+                header:
+                  Referer: "https://example.com"
+                  User-Agent: "Mozilla/5.0 ..."
+        "404":
+          description: 插件不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        uptime:
+          type: string
+        plugins:
+          type: object
+          properties:
+            loaded:
+              type: integer
+            failed:
+              type: integer
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                  status:
+                    type: string
+                  loadTime:
+                    type: string
+
+    ListResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        sources:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              name:
+                type: string
+              api:
+                type: string
+
+    PlayResponse:
+      type: object
+      properties:
+        parse:
+          type: integer
+          description: "0=可直接播放，1=仍需解析"
+        url:
+          type: string
+        header:
+          type: object
+          additionalProperties:
+            type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        msg:
+          type: string
+      example:
+        code: 404
+        msg: "Plugin not found: xxx"

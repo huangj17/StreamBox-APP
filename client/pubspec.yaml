@@ -1,0 +1,73 @@
+name: streambox
+description: "Netflix-style streaming app for Android TV & Windows"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  dio: ^5.7.0
+  # 桌面端播放内核（libmpv）
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_macos_video: ^1.1.4
+  media_kit_libs_windows_video: ^1.0.10
+  # iOS 虽然不走 media_kit（走 video_player），但 media_kit 的 iOS 插件会被
+  # GeneratedPluginRegistrant 自动注册，缺 libs_ios_video 里的 libmpv.framework
+  # 会在启动时 dlopen 失败 → EXC_BAD_ACCESS。保留此 libs 仅为满足符号依赖。
+  # IPA 体积会多 ~20MB。想进一步瘦身需要改 Podfile 排除 media_kit pod。
+  media_kit_libs_ios_video: ^1.1.4
+  # 移动 / TV 端播放内核（ExoPlayer / AVPlayer 硬解）
+  video_player: ^2.9.2
+  cached_network_image: ^3.4.1
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  go_router: ^14.8.1
+  window_manager: ^0.4.0
+  flutter_cache_manager: ^3.4.1
+  path_provider: ^2.1.5
+  # 播放期间保持屏幕常亮，防止 TV（尤其酷开）触发屏保后杀掉 App
+  wakelock_plus: ^1.2.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
+
+flutter:
+  uses-material-design: true
+
+flutter_launcher_icons:
+  image_path: "assets/icon.png"
+  android: "ic_launcher"
+  ios: true
+  remove_alpha_ios: true
+  min_sdk_android: 21
+  macos:
+    generate: true
+    # macOS Dock 遵循 squircle（圆角方块 + 留白）规范，用合成版而非透明原图
+    image_path: "assets/icon_macos.png"
+  windows:
+    generate: true
+    image_path: "assets/icon.png"
+    icon_size: 256
+
+flutter_native_splash:
+  # 黑底 + 居中 logo，与 app 主题一致
+  color: "#000000"
+  image: assets/icon.png
+  android: true
+  ios: true
+  # Android 12+ 强制把 icon 裁进圆形 mask，用留白版避免 logo 边缘被切
+  android_12:
+    color: "#000000"
+    image: assets/icon_splash.png
+    icon_background_color: "#000000"
+  # Web / Windows / Linux 不生成（Flutter 桌面启动无感知，Web 没必要）
+  web: false

@@ -1,0 +1,37 @@
+# JAR Bridge Service 配置
+
+server:
+  port: 9978
+  host: "0.0.0.0"
+
+timeout: 15000
+logLevel: INFO
+
+# 插件列表（已验证可用，顺序即优先级）
+plugins:
+  - key: "jianpian"
+    name: "荐片视频"
+    jar: "plugins/custom_spider_classes.jar"
+    class: "com.github.catvod.spider.Jianpian"
+    ext: ""
+
+  - key: "ikanbot"
+    name: "爱看机器人"
+    jar: "plugins/custom_spider_classes.jar"
+    class: "com.github.catvod.spider.Ikanbot"
+    ext: '{"box": "TVBox", "danmu": false}'
+
+  - key: "ysj"
+    name: "异世界动漫"
+    jar: "plugins/custom_spider_classes.jar"
+    class: "com.github.catvod.spider.Ysj"
+    ext: ""
+
+  # hidden=true：不出现在 /api/list 中（即 StreamBox 客户端自动发现时跳过），
+  # 需要时手动把 http://<bridge-host>:9978/api/doll 当 CMS 源添加
+  - key: "doll"
+    name: "Doll"
+    jar: "plugins/custom_spider_classes.jar"
+    class: "com.github.catvod.spider.Doll"
+    ext: ""
+    hidden: true

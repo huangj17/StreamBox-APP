@@ -1,0 +1,12 @@
+services:
+  jar-bridge:
+    build: .
+    ports:
+      - "9978:9978"
+    volumes:
+      - ./plugins:/app/plugins
+      - ./config.yml:/app/config.yml
+      - ./data:/app/data
+    environment:
+      - JAVA_OPTS=-Xmx256m
+    restart: unless-stopped

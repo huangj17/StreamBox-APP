@@ -1,0 +1,7 @@
+ktor:
+  deployment:
+    port: 9978
+    host: 0.0.0.0
+  application:
+    modules:
+      - com.streambox.bridge.ApplicationKt.module
