@@ -17,4 +17,4 @@ AGENTS.md
 # Logs
 *.log
 
-./docs
+docs/
