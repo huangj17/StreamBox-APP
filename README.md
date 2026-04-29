@@ -86,6 +86,14 @@ flutter run -d macos
 - [ ] **国际化（i18n）** — 多语言界面
 - [ ] **主题** — 亮色 / 暗色 / 自定义强调色
 
+## 贡献
+
+欢迎 Issue 和 PR。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+
+- Bug / 功能建议走 [Issues](https://github.com/huangj17/StreamBox-APP/issues)，使用对应模板
+- 较大改动先开 Issue 讨论再写代码
+- `main` 分支受保护，所有改动须通过 PR + 1 个 approval
+
 ## 许可证
 
 [MIT License](LICENSE)。本项目仅作技术研究与学习用途，使用者需自行确保所接入的内容源合法合规，与本项目作者无关。
