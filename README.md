@@ -2,6 +2,14 @@
 
 Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。本仓库为 Monorepo，包含 Flutter 客户端和 JAR Bridge 中间服务。
 
+## 预览
+
+![首页截图](client/assets/screenshot.png)
+
+<video src="https://github.com/huangj17/StreamBox-APP/raw/main/client/assets/StreamBox.mp4" controls width="720"></video>
+
+> 视频如未在 GitHub 网页内联播放，可点击 [此处下载查看](client/assets/StreamBox.mp4)。
+
 ## 仓库结构
 
 | 目录             | 说明                                  | 技术栈                              | README                                         |
@@ -55,6 +63,29 @@ flutter run -d macos
 | ------------- | --------------------------------------------- |
 | client        | Flutter SDK >= 3.11、Dart SDK >= 3.11、CocoaPods（macOS） |
 | jar-bridge    | JDK 21+                                       |
+
+## 路线图
+
+欢迎通过 Issue / PR 参与贡献。优先级以用户反馈为准。
+
+### 优化项
+
+- [ ] **TV 遥控器交互** — 焦点流转、按键映射、长按行为打磨
+- [ ] **切源稳定性** — 消除偶发的"切源失败需多次点击"问题
+- [ ] **冷启动速度** — 启动到首页可见的耗时优化
+- [ ] **大列表滚动性能** — 封面预取与图片缓存策略
+- [ ] **错误提示与重试** — 网络异常的引导更友好，避免空白页
+
+### 待开发功能
+
+- [ ] **直播频道** — IPTV / M3U 源支持
+- [ ] **弹幕** — 第三方弹幕源对接
+- [ ] **投屏** — DLNA / AirPlay / Chromecast
+- [ ] **字幕** — 外挂字幕加载、字号 / 颜色 / 偏移调整
+- [ ] **跳过片头片尾** — 手动设置 + 自动记忆
+- [ ] **搜索增强** — 历史记录、关键词建议、按类型/年份筛选
+- [ ] **国际化（i18n）** — 多语言界面
+- [ ] **主题** — 亮色 / 暗色 / 自定义强调色
 
 ## 许可证
 

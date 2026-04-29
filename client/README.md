@@ -21,9 +21,13 @@
 - **观看历史 + 收藏** — Hive 本地持久化，下次打开自动续播
 - **分类智能排序** — 用户观看某分类 ≥3 次后自动提权排到前面
 
-## 截图
+## 预览
 
-<!-- TODO: 添加应用截图 -->
+![首页截图](assets/screenshot.png)
+
+<video src="https://github.com/huangj17/StreamBox-APP/raw/main/client/assets/StreamBox.mp4" controls width="720"></video>
+
+> 视频如未在 GitHub 网页内联播放，可点击 [此处下载查看](assets/StreamBox.mp4)。
 
 ## 技术栈
 
