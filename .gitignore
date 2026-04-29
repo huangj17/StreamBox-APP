@@ -9,6 +9,12 @@ Thumbs.db
 
 # Claude
 .claude/
+CLAUDE.md
+
+#Codex
+AGENTS.md
 
 # Logs
 *.log
+
+./docs
