@@ -43,48 +43,29 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
   return repo.getCategories(sites, categoryWeights: weights);
 });
 
-/// Banner 数据：从不同分类各取一条，凑够 5 条，保证内容多样性。
+/// Banner 数据：从前若干个动态分类各取首条，凑够 5 条，保证内容多样性。
+///
+/// 复用 [categoryItemsProvider] family —— 与首屏前几行 rail 共享同一份请求，
+/// 不产生冗余网络流量；同时把这些分类的首页数据并发预热，rail 渲染时直接命中缓存。
 /// 完全自包含，绝不抛异常。
 final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
-  final sites = ref.watch(sitesProvider);
-  if (sites.isEmpty) return [];
+  final categories = await ref.watch(categoriesProvider.future);
+  final dynamicCats =
+      categories.where((c) => c.type == CategoryType.dynamic).toList();
+  if (dynamicCats.isEmpty) return [];
 
-  final api = ref.read(cmsApiProvider);
-  final bannerItems = <VideoItem>[];
+  // 取前 8 个候选分类并发拉，最终保留前 5 条非空首条
+  final picks = dynamicCats.take(8).toList();
+  final results = await Future.wait(
+    picks.map(
+      (cat) => ref
+          .read(categoryItemsProvider(cat.id).future)
+          .then<VideoItem?>((r) => r.items.isNotEmpty ? r.items.first : null)
+          .catchError((_) => null),
+    ),
+  );
 
-  for (final site in sites) {
-    if (bannerItems.length >= 5) break;
-    try {
-      final categories = await api.fetchCategories(site);
-      if (categories.isEmpty) continue;
-
-      final hasSubs = categories.any((c) => c.typePid > 0);
-      final candidates = hasSubs
-          ? categories.where((c) => c.typePid > 0).toList()
-          : categories;
-
-      // 从每个分类取第一条，凑够 5 条
-      for (final cat in candidates) {
-        if (bannerItems.length >= 5) break;
-        try {
-          final result = await api.fetchVideoList(
-            site: site,
-            categoryId: cat.id,
-            page: 1,
-          );
-          if (result.items.isNotEmpty) {
-            bannerItems.add(result.items.first);
-          }
-        } catch (_) {
-          continue;
-        }
-      }
-    } catch (_) {
-      continue;
-    }
-  }
-
-  return bannerItems;
+  return results.whereType<VideoItem>().take(5).toList();
 });
 
 /// 每个分类行的内容（family：会话级缓存，避免滚动时重复请求导致数据错乱）

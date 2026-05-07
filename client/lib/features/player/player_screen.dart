@@ -20,6 +20,17 @@ import '../home/providers/categories_provider.dart';
 import 'engine/video_engine.dart';
 import 'engine/video_engine_factory.dart';
 
+bool _isConfirmKey(LogicalKeyboardKey key) =>
+    key == LogicalKeyboardKey.select ||
+    key == LogicalKeyboardKey.enter ||
+    key == LogicalKeyboardKey.numpadEnter ||
+    key == LogicalKeyboardKey.gameButtonA;
+
+bool _isPlayPauseKey(LogicalKeyboardKey key) =>
+    _isConfirmKey(key) ||
+    key == LogicalKeyboardKey.space ||
+    key == LogicalKeyboardKey.mediaPlayPause;
+
 /// 全屏播放页
 class PlayerScreen extends ConsumerStatefulWidget {
   final String videoId;
@@ -51,7 +62,8 @@ class PlayerScreen extends ConsumerStatefulWidget {
   ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener {
+class _PlayerScreenState extends ConsumerState<PlayerScreen>
+    with WindowListener {
   late final VideoEngine _engine;
   late HistoryStorage _historyStorage;
   late PlayerSettingsStorage _playerSettings;
@@ -117,8 +129,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
 
   // ── 计算属性 ──
 
-  Episode get _current =>
-      widget.episodeGroups[_groupIndex][_episodeIndex];
+  Episode get _current => widget.episodeGroups[_groupIndex][_episodeIndex];
 
   bool get _hasPrev => _episodeIndex > 0;
   bool get _hasNext =>
@@ -142,9 +153,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     _historyStorage = ref.read(historyStorageProvider);
     _playerSettings = ref.read(playerSettingsStorageProvider);
 
-    _engine = createVideoEngine(
-      hardwareDecode: _playerSettings.hardwareDecode,
-    );
+    _engine = createVideoEngine(hardwareDecode: _playerSettings.hardwareDecode);
 
     // 应用默认倍速
     _playbackSpeed = _playerSettings.defaultSpeed;
@@ -210,17 +219,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
         final label = h >= 2160
             ? '4K'
             : h >= 1080
-                ? '1080P'
-                : h >= 720
-                    ? '720P'
-                    : '${h}P';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('当前源支持多画质切换（最高 $label）'),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
-          backgroundColor: const Color(0xDD333333),
-          margin: const EdgeInsets.only(bottom: 80, left: 20, right: 20),
-        ));
+            ? '1080P'
+            : h >= 720
+            ? '720P'
+            : '${h}P';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('当前源支持多画质切换（最高 $label）'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            backgroundColor: const Color(0xDD333333),
+            margin: const EdgeInsets.only(bottom: 80, left: 20, right: 20),
+          ),
+        );
       }
     });
     _currentQualitySub = _engine.currentQualityStream.listen((q) {
@@ -339,6 +350,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.linux;
 
+  bool get _usesLeanbackControls => PlatformService.isTv || _isDesktopPlatform;
+
   // ── WindowListener（桌面端全屏状态同步） ──
 
   @override
@@ -405,9 +418,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
   }
 
   void _seekRelative(Duration delta) {
-    final ms = (_position + delta)
-        .inMilliseconds
-        .clamp(0, _duration.inMilliseconds);
+    final ms = (_position + delta).inMilliseconds.clamp(
+      0,
+      _duration.inMilliseconds,
+    );
     _engine.seek(Duration(milliseconds: ms));
     _showControls();
   }
@@ -417,9 +431,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
   /// 按住时每次 seek 的秒数：按得越久档位越高
   /// 间隔 150ms，档位：0~3次 10s → 4~12次 30s → 13次+ 60s
   int _seekSeconds() {
-    if (_seekHoldCount < 4)  return 10;  // 0~0.45s : ±10s
-    if (_seekHoldCount < 13) return 30;  // 0.6~1.8s: ±30s
-    return 60;                           // 1.95s+  : ±60s
+    if (_seekHoldCount < 4) return 10; // 0~0.45s : ±10s
+    if (_seekHoldCount < 13) return 30; // 0.6~1.8s: ±30s
+    return 60; // 1.95s+  : ±60s
   }
 
   /// 按下时调用：立即 seek 一次，然后以 150ms 间隔持续加速 seek
@@ -428,7 +442,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     _seekHoldCount = 0;
 
     void doSeek() {
-      _seekRelative(Duration(seconds: forward ? _seekSeconds() : -_seekSeconds()));
+      _seekRelative(
+        Duration(seconds: forward ? _seekSeconds() : -_seekSeconds()),
+      );
       _seekHoldCount++;
     }
 
@@ -512,7 +528,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
-        position.dx, position.dy, position.dx, position.dy,
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
       ),
       color: AppColors.surface,
       items: [
@@ -525,24 +544,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.speed, color: AppColors.secondaryText, size: 18),
+                const Icon(
+                  Icons.speed,
+                  color: AppColors.secondaryText,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
-                Text('倍速 ${_playbackSpeed}x',
-                    style: const TextStyle(color: AppColors.primaryText)),
+                Text(
+                  '倍速 ${_playbackSpeed}x',
+                  style: const TextStyle(color: AppColors.primaryText),
+                ),
               ],
             ),
             itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                .map((s) => PopupMenuItem(
-                      value: s,
-                      child: Text(
-                        '${s}x',
-                        style: TextStyle(
-                          color: s == _playbackSpeed
-                              ? AppColors.netflixRed
-                              : AppColors.primaryText,
-                        ),
+                .map(
+                  (s) => PopupMenuItem(
+                    value: s,
+                    child: Text(
+                      '${s}x',
+                      style: TextStyle(
+                        color: s == _playbackSpeed
+                            ? AppColors.netflixRed
+                            : AppColors.primaryText,
                       ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
             onSelected: (speed) {
               setState(() => _playbackSpeed = speed);
@@ -583,12 +610,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
                     size: 18,
                   ),
                   const SizedBox(width: 8),
-                  Text(name,
-                      style: TextStyle(
-                        color: i == _groupIndex
-                            ? AppColors.netflixRed
-                            : AppColors.primaryText,
-                      )),
+                  Text(
+                    name,
+                    style: TextStyle(
+                      color: i == _groupIndex
+                          ? AppColors.netflixRed
+                          : AppColors.primaryText,
+                    ),
+                  ),
                 ],
               ),
             );
@@ -602,9 +631,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
       } else if (value.startsWith('source_')) {
         final idx = int.parse(value.substring(7));
         if (idx != _groupIndex) {
-          _switchEpisode(idx, _episodeIndex.clamp(
-            0, widget.episodeGroups[idx].length - 1,
-          ));
+          _switchEpisode(
+            idx,
+            _episodeIndex.clamp(0, widget.episodeGroups[idx].length - 1),
+          );
         }
       }
     });
@@ -613,42 +643,306 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
   // ── 画质选择对话框（右键菜单触发） ──
 
   void _showQualityPicker() {
-    showDialog<void>(
-      context: context,
-      barrierColor: Colors.black54,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('画质切换', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _PickerTile(
-              title: '自动',
-              selected: _currentQuality.isAuto,
-              autofocus: _currentQuality.isAuto,
-              onTap: () {
-                Navigator.of(context).pop();
-                _engine.setQuality(const VideoQuality.auto());
-                setState(() => _currentQuality = const VideoQuality.auto());
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('画质切换', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PickerTile(
+                title: '自动',
+                selected: _currentQuality.isAuto,
+                autofocus: _currentQuality.isAuto,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _engine.setQuality(const VideoQuality.auto());
+                  setState(() => _currentQuality = const VideoQuality.auto());
+                },
+              ),
+              ..._qualities.map((q) {
+                final selected = q.id == _currentQuality.id;
+                return _PickerTile(
+                  title: _qualityLabel(q),
+                  subtitle: '${q.width}×${q.height}',
+                  selected: selected,
+                  autofocus: selected,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _engine.setQuality(q);
+                    setState(() => _currentQuality = q);
+                  },
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
+    );
+  }
+
+  void _trackDialog(Future<void> dialog, {VoidCallback? onComplete}) {
+    dialog.whenComplete(() => onComplete?.call());
+  }
+
+  void _showPlaybackOptionsPanel() {
+    _hideTimer?.cancel();
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => Dialog(
+          alignment: Alignment.bottomCenter,
+          backgroundColor: const Color(0xFF151515),
+          insetPadding: const EdgeInsets.fromLTRB(56, 0, 56, 44),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 880),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('播放选项', style: AppTypography.headline2),
+                      ),
+                      Text(
+                        _sourceName,
+                        style: AppTypography.body.copyWith(
+                          color: Colors.white54,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Wrap(
+                    spacing: AppSpacing.md,
+                    runSpacing: AppSpacing.md,
+                    children: [
+                      _OptionTile(
+                        icon: Icons.video_library,
+                        title: '选集',
+                        subtitle: _current.name,
+                        autofocus: true,
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          _showTvEpisodePicker();
+                        },
+                      ),
+                      if (widget.episodeGroups.length > 1)
+                        _OptionTile(
+                          icon: Icons.swap_horiz,
+                          title: '线路',
+                          subtitle: _sourceName,
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            _showTvSourcePicker();
+                          },
+                        ),
+                      if (_qualities.length > 1)
+                        _OptionTile(
+                          icon: Icons.hd,
+                          title: '画质',
+                          subtitle: _currentQuality.isAuto
+                              ? '自动'
+                              : _qualityLabel(_currentQuality),
+                          onTap: () {
+                            Navigator.of(context).pop();
+                            _showTvQualityPicker();
+                          },
+                        ),
+                      _OptionTile(
+                        icon: Icons.speed,
+                        title: '倍速',
+                        subtitle: _speedLabel(_playbackSpeed),
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          _showTvSpeedPicker();
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
+    );
+  }
+
+  void _showTvEpisodePicker() {
+    final episodes = widget.episodeGroups[_groupIndex];
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: Text(_sourceName, style: const TextStyle(color: Colors.white)),
+          content: SizedBox(
+            width: 460,
+            height: episodes.length > 8 ? 480 : null,
+            child: ListView.builder(
+              shrinkWrap: episodes.length <= 8,
+              itemCount: episodes.length,
+              itemBuilder: (_, i) {
+                final selected = i == _episodeIndex;
+                return _PickerTile(
+                  title: episodes[i].name,
+                  selected: selected,
+                  autofocus: selected,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    if (i != _episodeIndex) _switchEpisode(_groupIndex, i);
+                  },
+                );
               },
             ),
-            ..._qualities.map((q) {
-              final selected = q.id == _currentQuality.id;
+          ),
+        ),
+      ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
+    );
+  }
+
+  void _showTvSourcePicker() {
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('切换线路', style: TextStyle(color: Colors.white)),
+          content: SizedBox(
+            width: 420,
+            height: widget.episodeGroups.length > 8 ? 440 : null,
+            child: ListView.builder(
+              shrinkWrap: widget.episodeGroups.length <= 8,
+              itemCount: widget.episodeGroups.length,
+              itemBuilder: (_, i) {
+                final selected = i == _groupIndex;
+                final name = widget.sourceNames.length > i
+                    ? widget.sourceNames[i]
+                    : '线路 ${i + 1}';
+                return _PickerTile(
+                  title: name,
+                  selected: selected,
+                  autofocus: selected,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    if (i != _groupIndex) {
+                      _switchEpisode(
+                        i,
+                        _episodeIndex.clamp(
+                          0,
+                          widget.episodeGroups[i].length - 1,
+                        ),
+                      );
+                    }
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
+    );
+  }
+
+  void _showTvQualityPicker() {
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('画质', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PickerTile(
+                title: '自动',
+                selected: _currentQuality.isAuto,
+                autofocus: _currentQuality.isAuto,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _engine.setQuality(const VideoQuality.auto());
+                  setState(() => _currentQuality = const VideoQuality.auto());
+                },
+              ),
+              ..._qualities.map((q) {
+                final selected = q.id == _currentQuality.id;
+                return _PickerTile(
+                  title: _qualityLabel(q),
+                  subtitle: '${q.width}×${q.height}',
+                  selected: selected,
+                  autofocus: selected,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    _engine.setQuality(q);
+                    setState(() => _currentQuality = q);
+                  },
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
+    );
+  }
+
+  void _showTvSpeedPicker() {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    _trackDialog(
+      showDialog<void>(
+        context: context,
+        barrierColor: Colors.black54,
+        builder: (_) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text('倍速', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: speeds.map((s) {
+              final selected = s == _playbackSpeed;
               return _PickerTile(
-                title: _qualityLabel(q),
-                subtitle: '${q.width}×${q.height}',
+                title: _speedLabel(s),
                 selected: selected,
                 autofocus: selected,
                 onTap: () {
                   Navigator.of(context).pop();
-                  _engine.setQuality(q);
-                  setState(() => _currentQuality = q);
+                  setState(() => _playbackSpeed = s);
+                  _engine.setRate(s);
                 },
               );
-            }),
-          ],
+            }).toList(),
+          ),
         ),
       ),
+      onComplete: () {
+        if (mounted) _scheduleHide();
+      },
     );
   }
 
@@ -662,28 +956,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     return '${h}P';
   }
 
+  static String _speedLabel(double s) {
+    if (s == s.truncateToDouble()) return '${s.toInt()}x';
+    return '${s}x';
+  }
+
   // ── 历史记录 ──
 
   void _saveHistory() {
     if (_duration == Duration.zero) return;
-    _historyStorage.save(WatchHistory(
-      videoId: widget.videoId,
-      siteKey: widget.siteKey,
-      title: widget.videoTitle,
-      cover: widget.cover,
-      episodeName: _current.name,
-      episodeIndex: _episodeIndex,
-      groupIndex: _groupIndex,
-      positionMs: _position.inMilliseconds,
-      durationMs: _duration.inMilliseconds,
-      updatedAt: DateTime.now(),
-      category: widget.category,
-    ));
+    _historyStorage.save(
+      WatchHistory(
+        videoId: widget.videoId,
+        siteKey: widget.siteKey,
+        title: widget.videoTitle,
+        cover: widget.cover,
+        episodeName: _current.name,
+        episodeIndex: _episodeIndex,
+        groupIndex: _groupIndex,
+        positionMs: _position.inMilliseconds,
+        durationMs: _duration.inMilliseconds,
+        updatedAt: DateTime.now(),
+        category: widget.category,
+      ),
+    );
   }
 
   // ── 键盘 / 遥控器事件 ──
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (PlatformService.isTv) return _handleTvKey(event);
+
     // 松开方向键时停止加速（只影响外层自己启动的 hold）
     if (event is KeyUpEvent) {
       if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
@@ -697,13 +1000,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     // 仅处理 KeyDownEvent；KeyRepeatEvent 由 _seekHoldTimer 自主控制频率
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
+    if (_isPlayPauseKey(event.logicalKey)) {
+      _showControls();
+      _engine.playOrPause();
+      return KeyEventResult.handled;
+    }
+
     // 全局快捷键：无论控制栏是否可见、焦点在哪里，都处理
     switch (event.logicalKey) {
-      case LogicalKeyboardKey.mediaPlayPause:
-      case LogicalKeyboardKey.space:
-        _engine.playOrPause();
-        _showControls();
-        return KeyEventResult.handled;
       case LogicalKeyboardKey.escape:
         _stopSeekHold();
         // 全屏中按 ESC：先退出全屏，不返回上一页
@@ -724,34 +1028,115 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
         return KeyEventResult.handled;
     }
 
-    // TV 模式：让焦点系统接管方向键 / Select
-    // 外层 Focus 只在"控制栏隐藏"时处理按键——任意键先把控制栏拉起并聚焦
-    if (PlatformService.isTv) {
-      if (!_controlsVisible) {
-        _showControls();
-        return KeyEventResult.handled;
-      }
-      // 控制栏已可见时：按键会先命中某个按钮的 Focus；
-      // 只有焦点回落到 root 时才会进到这里——重置隐藏计时，让焦点系统自然导航
-      _scheduleHide();
-      return KeyEventResult.ignored;
-    }
-
-    // 非 TV（桌面键盘 / 手机外接键盘）：保留原有全局方向键 seek
-    _showControls();
+    // 非 TV（桌面键盘 / 手机外接键盘）：保留全局播放快捷键，同时允许桌面模拟 TV 面板
     switch (event.logicalKey) {
-      case LogicalKeyboardKey.select:
-      case LogicalKeyboardKey.enter:
-        _engine.playOrPause();
-        return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowLeft:
         _startSeekHold(false);
         return KeyEventResult.handled;
       case LogicalKeyboardKey.arrowRight:
         _startSeekHold(true);
         return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowUp:
+      case LogicalKeyboardKey.contextMenu:
+        _showControls();
+        _showPlaybackOptionsPanel();
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowDown:
+        if (_usesLeanbackControls) {
+          if (_controlsVisible) {
+            _hideControls();
+          } else {
+            _showControls();
+          }
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      case LogicalKeyboardKey.keyM:
+        _showControls();
+        _showPlaybackOptionsPanel();
+        return KeyEventResult.handled;
       default:
         return KeyEventResult.ignored;
+    }
+  }
+
+  KeyEventResult _handleTvKey(KeyEvent event) {
+    final key = event.logicalKey;
+
+    if (_error != null) {
+      _stopSeekHold();
+      if (event is KeyDownEvent &&
+          (key == LogicalKeyboardKey.goBack ||
+              key == LogicalKeyboardKey.escape)) {
+        context.pop();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event is KeyUpEvent) {
+      if (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight) {
+        _stopSeekHold();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event is KeyRepeatEvent) {
+      if (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight ||
+          _isPlayPauseKey(key)) {
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    if (_isPlayPauseKey(key)) {
+      _engine.playOrPause();
+      _showControls();
+      return KeyEventResult.handled;
+    }
+
+    switch (key) {
+      case LogicalKeyboardKey.arrowLeft:
+        _startSeekHold(false);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowRight:
+        _startSeekHold(true);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowUp:
+      case LogicalKeyboardKey.contextMenu:
+        _showControls();
+        _showPlaybackOptionsPanel();
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.arrowDown:
+        if (_controlsVisible) {
+          _hideControls();
+        } else {
+          _showControls();
+        }
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.escape:
+      case LogicalKeyboardKey.goBack:
+        _stopSeekHold();
+        if (_controlsVisible) {
+          _hideControls();
+        } else {
+          context.pop();
+        }
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.mediaTrackPrevious:
+        if (_hasPrev) _switchEpisode(_groupIndex, _episodeIndex - 1);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.mediaTrackNext:
+        if (_hasNext) _switchEpisode(_groupIndex, _episodeIndex + 1);
+        return KeyEventResult.handled;
+      default:
+        _showControls();
+        return KeyEventResult.handled;
     }
   }
 
@@ -778,156 +1163,166 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
               behavior: HitTestBehavior.opaque,
               onTap: _toggleControls,
               onSecondaryTapUp: _isDesktopPlatform ? _showContextMenu : null,
-          child: Stack(
-            children: [
-              // 全屏视频（禁用内置控件，使用自定义控制栏）
-              Positioned.fill(child: _engine.buildVideoView()),
+              child: Stack(
+                children: [
+                  // 全屏视频（禁用内置控件，使用自定义控制栏）
+                  Positioned.fill(child: _engine.buildVideoView()),
 
-              // 初始加载遮罩（还没开始播放时）
-              if (_buffering && _position == Duration.zero)
-                _LoadingOverlay(
-                  title: widget.videoTitle,
-                  episodeName: _current.name,
-                  sourceName: _sourceName,
-                  bufferingSeconds: _bufferingSeconds(),
-                  speedBps: _speedBps,
-                ),
-
-              // 中途缓冲小圆圈（避开状态栏 / 刘海屏）
-              if (_buffering && _position > Duration.zero)
-                Positioned(
-                  top: 0,
-                  right: 0,
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.only(
-                        top: AppSpacing.sm,
-                        right: AppSpacing.md,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_speedBps != null)
-                            Padding(
-                              padding:
-                                  const EdgeInsets.only(right: AppSpacing.sm),
-                              child: Text(
-                                NetworkSpeedMonitor.format(_speedBps),
-                                style: AppTypography.caption
-                                    .copyWith(color: Colors.white),
-                              ),
-                            ),
-                          const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              color: AppColors.netflixRed,
-                              strokeWidth: 2,
-                            ),
-                          ),
-                        ],
-                      ),
+                  // 初始加载遮罩（还没开始播放时）
+                  if (_buffering && _position == Duration.zero)
+                    _LoadingOverlay(
+                      title: widget.videoTitle,
+                      episodeName: _current.name,
+                      sourceName: _sourceName,
+                      bufferingSeconds: _bufferingSeconds(),
+                      speedBps: _speedBps,
                     ),
-                  ),
-                ),
 
-              // 播放失败遮罩
-              if (_error != null)
-                _ErrorOverlay(
-                  message: _error!,
-                  sourceName: _sourceName,
-                  onRetry: () {
-                    setState(() => _error = null);
-                    _playCurrentEpisode();
-                  },
-                  onBack: () => context.pop(),
-                  // 多线路时提供手动切换
-                  onSwitchSource: widget.episodeGroups.length > 1
-                      ? () {
-                          final next = (_groupIndex + 1) % widget.episodeGroups.length;
-                          final epIdx = _episodeIndex.clamp(0, widget.episodeGroups[next].length - 1);
-                          setState(() {
-                            _groupIndex = next;
-                            _episodeIndex = epIdx;
-                            _error = null;
-                          });
-                          _playCurrentEpisode();
-                        }
-                      : null,
-                ),
-
-              // 返回按钮（左上角）
-              Positioned(
-                top: 0,
-                left: 0,
-                child: AnimatedOpacity(
-                  opacity: _controlsVisible ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: IgnorePointer(
-                    ignoring: !_controlsVisible,
-                    child: ExcludeFocus(
-                      excluding: !_controlsVisible,
+                  // 中途缓冲小圆圈（避开状态栏 / 刘海屏）
+                  if (_buffering && _position > Duration.zero)
+                    Positioned(
+                      top: 0,
+                      right: 0,
                       child: SafeArea(
                         child: Padding(
-                          padding: const EdgeInsets.all(AppSpacing.sm),
-                          child: _FocusableRow(
-                            padding: const EdgeInsets.all(AppSpacing.sm),
-                            borderRadius:
-                                const BorderRadius.all(Radius.circular(24)),
-                            onActivate: () => context.pop(),
-                            child: const Icon(
-                              Icons.arrow_back,
-                              color: Colors.white,
-                              size: 28,
+                          padding: const EdgeInsets.only(
+                            top: AppSpacing.sm,
+                            right: AppSpacing.md,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_speedBps != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    right: AppSpacing.sm,
+                                  ),
+                                  child: Text(
+                                    NetworkSpeedMonitor.format(_speedBps),
+                                    style: AppTypography.caption.copyWith(
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: AppColors.netflixRed,
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // 播放失败遮罩
+                  if (_error != null)
+                    _ErrorOverlay(
+                      message: _error!,
+                      sourceName: _sourceName,
+                      onRetry: () {
+                        setState(() => _error = null);
+                        _playCurrentEpisode();
+                      },
+                      onBack: () => context.pop(),
+                      // 多线路时提供手动切换
+                      onSwitchSource: widget.episodeGroups.length > 1
+                          ? () {
+                              final next =
+                                  (_groupIndex + 1) %
+                                  widget.episodeGroups.length;
+                              final epIdx = _episodeIndex.clamp(
+                                0,
+                                widget.episodeGroups[next].length - 1,
+                              );
+                              setState(() {
+                                _groupIndex = next;
+                                _episodeIndex = epIdx;
+                                _error = null;
+                              });
+                              _playCurrentEpisode();
+                            }
+                          : null,
+                    ),
+
+                  // 返回按钮（左上角）
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !_controlsVisible,
+                        child: ExcludeFocus(
+                          excluding: !_controlsVisible,
+                          child: SafeArea(
+                            child: Padding(
+                              padding: const EdgeInsets.all(AppSpacing.sm),
+                              child: _FocusableRow(
+                                padding: const EdgeInsets.all(AppSpacing.sm),
+                                borderRadius: const BorderRadius.all(
+                                  Radius.circular(24),
+                                ),
+                                onActivate: () => context.pop(),
+                                child: const Icon(
+                                  Icons.arrow_back,
+                                  color: Colors.white,
+                                  size: 28,
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
 
-              // 控制栏（底部）：Positioned 必须是 Stack 直接子级
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: AnimatedOpacity(
-                  opacity: _controlsVisible ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  child: IgnorePointer(
-                    ignoring: !_controlsVisible,
-                    // ExcludeFocus：控制栏隐藏时剥夺内部焦点，焦点自然回到外层
-                    // _rootFocusNode，TV 用户下一次按键会先拉起控制栏
-                    child: ExcludeFocus(
-                      excluding: !_controlsVisible,
-                      // 包一层空 onTap 吃掉控制栏区域的 tap，防止冒泡到外层
-                      // _toggleControls —— 点击控制栏空隙不该隐藏控制栏；同时
-                      // 避免手机端外层 Tap 手势抢占 Slider 的 tap-to-seek。
-                      // 子组件（按钮、Slider）的手势识别器仍优先胜出（deepest wins）。
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          // 点击控制栏时重置自动隐藏计时器，保持可见
-                          _showControls();
-                        },
-                        child: _buildControlBar(),
+                  // 控制栏（底部）：Positioned 必须是 Stack 直接子级
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !_controlsVisible,
+                        // ExcludeFocus：控制栏隐藏时剥夺内部焦点，焦点自然回到外层
+                        // _rootFocusNode，TV 用户下一次按键会先拉起控制栏
+                        child: ExcludeFocus(
+                          excluding: !_controlsVisible,
+                          // 包一层空 onTap 吃掉控制栏区域的 tap，防止冒泡到外层
+                          // _toggleControls —— 点击控制栏空隙不该隐藏控制栏；同时
+                          // 避免手机端外层 Tap 手势抢占 Slider 的 tap-to-seek。
+                          // 子组件（按钮、Slider）的手势识别器仍优先胜出（deepest wins）。
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              // 点击控制栏时重置自动隐藏计时器，保持可见
+                              _showControls();
+                            },
+                            child: _buildControlBar(),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
-      ),
-    ),
-  );
+    );
   }
 
   Widget _buildControlBar() {
+    if (_usesLeanbackControls) return _buildLeanbackControlBar();
+
     final isMobile = PlatformService.isMobile;
     final hPad = isMobile ? AppSpacing.md : AppSpacing.xl;
     final btnGap = isMobile ? AppSpacing.lg : AppSpacing.xl;
@@ -939,9 +1334,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
           colors: [Colors.transparent, Colors.black87],
         ),
       ),
-      padding: EdgeInsets.fromLTRB(
-        hPad, AppSpacing.lg, hPad, AppSpacing.md,
-      ),
+      padding: EdgeInsets.fromLTRB(hPad, AppSpacing.lg, hPad, AppSpacing.md),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -976,14 +1369,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
                         _volume == 0
                             ? Icons.volume_off
                             : _volume < 0.5
-                                ? Icons.volume_down
-                                : Icons.volume_up,
+                            ? Icons.volume_down
+                            : Icons.volume_up,
                         color: Colors.white70,
                         size: 16,
                       ),
                       const SizedBox(width: 4),
-                      Text('${(_volume * 100).round()}%',
-                          style: AppTypography.caption),
+                      Text(
+                        '${(_volume * 100).round()}%',
+                        style: AppTypography.caption,
+                      ),
                     ],
                   ),
                 ),
@@ -1009,7 +1404,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
               else
                 Text(_sourceName, style: AppTypography.caption),
               // 全屏按钮：桌面 + 移动（TV 始终全屏无需切换）
-              if (_isDesktopPlatform || PlatformService.isMobile) ...[
+              if (!PlatformService.isTv &&
+                  (_isDesktopPlatform || PlatformService.isMobile)) ...[
                 const SizedBox(width: AppSpacing.md),
                 _FocusableRow(
                   onActivate: _toggleFullscreen,
@@ -1089,6 +1485,206 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
     );
   }
 
+  Widget _buildLeanbackControlBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.transparent, Color(0xB3000000), Color(0xF5000000)],
+          stops: [0.0, 0.42, 1.0],
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(72, 56, 72, 34),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.videoTitle,
+                      style: AppTypography.title.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      '${_current.name} · $_sourceName${_currentQuality.isAuto ? '' : ' · ${_qualityLabel(_currentQuality)}'}',
+                      style: AppTypography.body.copyWith(
+                        color: Colors.white60,
+                        fontSize: 16,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (_qualities.length > 1) ...[
+                const SizedBox(width: AppSpacing.md),
+                _LeanbackActionButton(
+                  icon: Icons.hd,
+                  label: _currentQuality.isAuto
+                      ? '自动'
+                      : _qualityLabel(_currentQuality),
+                  dense: true,
+                  onTap: _showTvQualityPicker,
+                ),
+              ],
+              const SizedBox(width: AppSpacing.sm),
+              _LeanbackActionButton(
+                icon: Icons.speed,
+                label: _speedLabel(_playbackSpeed),
+                dense: true,
+                onTap: _showTvSpeedPicker,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _LeanbackActionButton(
+                icon: Icons.swap_horiz,
+                label: _sourceName,
+                dense: true,
+                onTap: widget.episodeGroups.length > 1
+                    ? _showTvSourcePicker
+                    : null,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _LeanbackActionButton(
+                icon: Icons.video_library,
+                label: '选集',
+                dense: true,
+                onTap: _showTvEpisodePicker,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _LeanbackActionButton(
+                icon: Icons.tune,
+                label: '更多',
+                dense: true,
+                onTap: _showPlaybackOptionsPanel,
+              ),
+              if (_isDesktopPlatform || PlatformService.isMobile) ...[
+                const SizedBox(width: AppSpacing.sm),
+                _LeanbackActionButton(
+                  icon: _isFullscreen
+                      ? Icons.fullscreen_exit
+                      : Icons.fullscreen,
+                  label: _isFullscreen ? '退出' : '全屏',
+                  dense: true,
+                  onTap: _toggleFullscreen,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              SizedBox(
+                width: 70,
+                child: Text(
+                  _fmt(_position),
+                  style: AppTypography.body.copyWith(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _isDesktopPlatform
+                    ? _buildSlider()
+                    : _buildTvProgressBar(),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              SizedBox(
+                width: 88,
+                child: Text(
+                  _fmt(_duration),
+                  textAlign: TextAlign.right,
+                  style: AppTypography.body.copyWith(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _LeanbackActionButton(
+                icon: Icons.skip_previous,
+                label: '上一集',
+                onTap: _hasPrev
+                    ? () => _switchEpisode(_groupIndex, _episodeIndex - 1)
+                    : null,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              _LeanbackActionButton(
+                icon: Icons.replay_10,
+                label: '后退',
+                onTap: () => _seekRelative(const Duration(seconds: -10)),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              _LeanbackPlayButton(
+                playing: _playing,
+                focusNode: _playPauseFocusNode,
+                onTap: () {
+                  _engine.playOrPause();
+                  _showControls();
+                },
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              _LeanbackActionButton(
+                icon: Icons.forward_10,
+                label: '前进',
+                onTap: () => _seekRelative(const Duration(seconds: 10)),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              _LeanbackActionButton(
+                icon: Icons.skip_next,
+                label: '下一集',
+                onTap: _hasNext
+                    ? () => _switchEpisode(_groupIndex, _episodeIndex + 1)
+                    : null,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTvProgressBar() {
+    final bufferedRatio = _duration.inMilliseconds > 0
+        ? (_buffered.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0)
+        : 0.0;
+    return SizedBox(
+      height: 8,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: const Color(0xFF343434)),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: bufferedRatio,
+              child: Container(color: Colors.white24),
+            ),
+            FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: _progress,
+              child: Container(color: AppColors.netflixRed),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSlider() {
     final sliderTheme = SliderThemeData(
       trackHeight: 4,
@@ -1115,7 +1711,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
       builder: (context, animValue, _) {
         final currentValue = animValue.clamp(0.0, 1.0);
         // secondary 必须 ≥ value，否则不绘制；取两者较大值
-        final secondary = bufferedRatio < currentValue ? currentValue : bufferedRatio;
+        final secondary = bufferedRatio < currentValue
+            ? currentValue
+            : bufferedRatio;
         return SliderTheme(
           data: sliderTheme,
           child: Slider(
@@ -1127,15 +1725,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
             },
             onChanged: _duration.inMilliseconds > 0
                 ? (v) => setState(() {
-                      _position = Duration(
-                        milliseconds: (v * _duration.inMilliseconds).round(),
-                      );
-                    })
+                    _position = Duration(
+                      milliseconds: (v * _duration.inMilliseconds).round(),
+                    );
+                  })
                 : null,
             onChangeEnd: (v) {
-              _engine.seek(Duration(
-                milliseconds: (v * _duration.inMilliseconds).round(),
-              ));
+              _engine.seek(
+                Duration(milliseconds: (v * _duration.inMilliseconds).round()),
+              );
               setState(() => _seeking = false);
               _scheduleHide();
             },
@@ -1168,6 +1766,86 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WindowListener
 
 // ── 子组件 ──
 
+class _OptionTile extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool autofocus;
+
+  const _OptionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_OptionTile> createState() => _OptionTileState();
+}
+
+class _OptionTileState extends State<_OptionTile> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: widget.autofocus,
+      descendantsAreFocusable: false,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent && _isConfirmKey(event.logicalKey)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 196,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _focused
+                ? Colors.white.withValues(alpha: 0.22)
+                : Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _focused ? Colors.white : Colors.white12,
+              width: 2,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.icon, color: Colors.white, size: 30),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                widget.title,
+                style: AppTypography.body.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.subtitle,
+                style: AppTypography.caption.copyWith(color: Colors.white54),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 对话框里的可聚焦列表项：选中项红字 + check 图标，焦点态白色半透明底
 /// TV 打开对话框时自动聚焦到选中项（通过 autofocus）
 class _PickerTile extends StatefulWidget {
@@ -1199,10 +1877,7 @@ class _PickerTileState extends State<_PickerTile> {
       descendantsAreFocusable: false,
       onFocusChange: (f) => setState(() => _focused = f),
       onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+        if (event is KeyDownEvent && _isPlayPauseKey(event.logicalKey)) {
           widget.onTap();
           return KeyEventResult.handled;
         }
@@ -1213,8 +1888,7 @@ class _PickerTileState extends State<_PickerTile> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: _focused
               ? Colors.white.withValues(alpha: 0.18)
               : Colors.transparent,
@@ -1241,7 +1915,9 @@ class _PickerTileState extends State<_PickerTile> {
                       Text(
                         widget.subtitle!,
                         style: const TextStyle(
-                            color: Colors.white38, fontSize: 12),
+                          color: Colors.white38,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ],
@@ -1342,8 +2018,11 @@ class _LoadingOverlay extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title,
-                style: AppTypography.headline2, textAlign: TextAlign.center),
+            Text(
+              title,
+              style: AppTypography.headline2,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: AppSpacing.sm),
             Text(episodeName, style: AppTypography.body),
             const SizedBox(height: AppSpacing.lg),
@@ -1380,12 +2059,7 @@ class _Btn extends StatefulWidget {
   final double size;
   final FocusNode? focusNode;
 
-  const _Btn({
-    required this.icon,
-    this.onTap,
-    this.size = 32,
-    this.focusNode,
-  });
+  const _Btn({required this.icon, this.onTap, this.size = 32, this.focusNode});
 
   @override
   State<_Btn> createState() => _BtnState();
@@ -1428,6 +2102,182 @@ class _BtnState extends State<_Btn> {
           child: Opacity(
             opacity: enabled ? 1.0 : 0.35,
             child: Icon(widget.icon, color: Colors.white, size: widget.size),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LeanbackActionButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool dense;
+
+  const _LeanbackActionButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.dense = false,
+  });
+
+  @override
+  State<_LeanbackActionButton> createState() => _LeanbackActionButtonState();
+}
+
+class _LeanbackActionButtonState extends State<_LeanbackActionButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    final iconSize = widget.dense ? 17.0 : 24.0;
+    final boxSize = widget.dense ? 36.0 : 48.0;
+    final width = widget.dense ? null : 64.0;
+    final opacity = enabled ? 1.0 : 0.35;
+    return Focus(
+      canRequestFocus: enabled,
+      descendantsAreFocusable: false,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            enabled &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          widget.onTap!();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Opacity(
+        opacity: opacity,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? widget.onTap : null,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: width,
+            padding: widget.dense
+                ? const EdgeInsets.symmetric(horizontal: 10, vertical: 7)
+                : EdgeInsets.zero,
+            decoration: widget.dense
+                ? BoxDecoration(
+                    color: _focused
+                        ? Colors.white.withValues(alpha: 0.20)
+                        : Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _focused ? Colors.white : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  )
+                : null,
+            child: widget.dense
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(widget.icon, color: Colors.white, size: iconSize),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 86),
+                        child: Text(
+                          widget.label,
+                          style: AppTypography.caption.copyWith(
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  )
+                : Center(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: boxSize,
+                      height: boxSize,
+                      decoration: BoxDecoration(
+                        color: _focused
+                            ? Colors.white.withValues(alpha: 0.20)
+                            : Colors.white.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _focused ? Colors.white : Colors.transparent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Icon(
+                        widget.icon,
+                        color: Colors.white,
+                        size: iconSize,
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LeanbackPlayButton extends StatefulWidget {
+  final bool playing;
+  final FocusNode? focusNode;
+  final VoidCallback onTap;
+
+  const _LeanbackPlayButton({
+    required this.playing,
+    required this.onTap,
+    this.focusNode,
+  });
+
+  @override
+  State<_LeanbackPlayButton> createState() => _LeanbackPlayButtonState();
+}
+
+class _LeanbackPlayButtonState extends State<_LeanbackPlayButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      focusNode: widget.focusNode,
+      descendantsAreFocusable: false,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: _focused
+                ? Colors.white.withValues(alpha: 0.24)
+                : Colors.white.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _focused ? Colors.white : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Icon(
+            widget.playing ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+            size: 38,
           ),
         ),
       ),
@@ -1537,7 +2387,11 @@ class _ErrorOverlay extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, color: AppColors.netflixRed, size: 48),
+            const Icon(
+              Icons.error_outline,
+              color: AppColors.netflixRed,
+              size: 48,
+            ),
             const SizedBox(height: AppSpacing.md),
             Text('播放失败', style: AppTypography.headline2),
             const SizedBox(height: AppSpacing.sm),
@@ -1549,34 +2403,133 @@ class _ErrorOverlay extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: AppSpacing.xl),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('重试'),
-                ),
-                if (onSwitchSource != null) ...[
+            if (PlatformService.isTv)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ErrorActionButton(
+                    icon: Icons.refresh,
+                    label: '重试',
+                    autofocus: true,
+                    onTap: onRetry,
+                  ),
+                  if (onSwitchSource != null) ...[
+                    const SizedBox(width: AppSpacing.md),
+                    _ErrorActionButton(
+                      icon: Icons.swap_horiz,
+                      label: '换线路',
+                      onTap: onSwitchSource!,
+                    ),
+                  ],
                   const SizedBox(width: AppSpacing.md),
+                  _ErrorActionButton(
+                    icon: Icons.arrow_back,
+                    label: '返回',
+                    onTap: onBack,
+                  ),
+                ],
+              )
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   ElevatedButton.icon(
-                    onPressed: onSwitchSource,
-                    icon: const Icon(Icons.swap_horiz),
-                    label: const Text('换线路'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.surface,
-                      foregroundColor: AppColors.primaryText,
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重试'),
+                  ),
+                  if (onSwitchSource != null) ...[
+                    const SizedBox(width: AppSpacing.md),
+                    ElevatedButton.icon(
+                      onPressed: onSwitchSource,
+                      icon: const Icon(Icons.swap_horiz),
+                      label: const Text('换线路'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.surface,
+                        foregroundColor: AppColors.primaryText,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: AppSpacing.md),
+                  TextButton(
+                    onPressed: onBack,
+                    child: const Text(
+                      '返回',
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
                 ],
-                const SizedBox(width: AppSpacing.md),
-                TextButton(
-                  onPressed: onBack,
-                  child: const Text('返回', style: TextStyle(color: Colors.white70)),
-                ),
-              ],
-            ),
+              ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorActionButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final bool autofocus;
+  final VoidCallback onTap;
+
+  const _ErrorActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_ErrorActionButton> createState() => _ErrorActionButtonState();
+}
+
+class _ErrorActionButtonState extends State<_ErrorActionButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: widget.autofocus,
+      descendantsAreFocusable: false,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          decoration: BoxDecoration(
+            color: _focused
+                ? Colors.white.withValues(alpha: 0.24)
+                : Colors.white.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: _focused ? Colors.white : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.icon, color: Colors.white, size: 24),
+              const SizedBox(width: 10),
+              Text(
+                widget.label,
+                style: AppTypography.body.copyWith(color: Colors.white),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1731,10 +2684,7 @@ class _SpeedSelector extends StatelessWidget {
   final double currentSpeed;
   final void Function(double) onSelect;
 
-  const _SpeedSelector({
-    required this.currentSpeed,
-    required this.onSelect,
-  });
+  const _SpeedSelector({required this.currentSpeed, required this.onSelect});
 
   static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
