@@ -14,6 +14,9 @@ class AppSpacing {
   static const double heroBannerHeight = 540.0;  // 50vh @ 1080p
   static const double controlBarHeight = 120.0;
   static const double settingsSidebarWidth = 280.0;
+  // SideNav（TV / 桌面焦点模式）
+  static const double sideNavCollapsedWidth = 80.0;
+  static const double sideNavExpandedWidth = 240.0;
 
   // 卡片尺寸
   static const double cardWidth = 160.0;

@@ -8,7 +8,7 @@ import '../../data/models/site.dart';
 import '../../data/models/category.dart';
 import '../../data/models/video_item.dart';
 import '../../data/models/watch_history.dart';
-import '../../widgets/top_nav_bar.dart';
+import '../../widgets/side_nav_bar.dart';
 import '../../widgets/skeleton_card.dart';
 import '../../core/platform/platform_service.dart';
 import 'providers/categories_provider.dart';
@@ -29,16 +29,14 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _urlController = TextEditingController();
   final _scrollController = ScrollController();
-  // 方向键「上」的兜底锚点：VideoCard 上键失败时跳回 Banner 播放；Banner 上键跳到顶栏首项
+  // 焦点锚点：Banner Play 是内容入口；navFirst 是 SideNav 首项
   final _bannerPlayFocus = FocusNode(debugLabel: 'banner-play');
-  final _topNavFirstFocus = FocusNode(debugLabel: 'top-nav-home');
-  bool _navOpaque = false;
+  final _sideNavFirstFocus = FocusNode(debugLabel: 'side-nav-home');
   bool _restoring = true; // 启动时恢复状态中，避免闪现输入界面
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
     // 从 Hive 恢复持久化状态
     WidgetsBinding.instance.addPostFrameCallback((_) => _restoreFromStorage());
   }
@@ -48,15 +46,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _urlController.dispose();
     _scrollController.dispose();
     _bannerPlayFocus.dispose();
-    _topNavFirstFocus.dispose();
+    _sideNavFirstFocus.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    final opaque = _scrollController.offset > 100;
-    if (opaque != _navOpaque) {
-      setState(() => _navOpaque = opaque);
-    }
   }
 
   /// 把首页滚回最顶（Banner 回到视口顶部）。供 VideoCard / 「更多」按钮在
@@ -216,77 +207,82 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     final isMobile = PlatformService.isMobile;
 
+    final mainContent = _restoring
+        ? _buildLoadingState()
+        : sites.isEmpty
+            ? _buildSourceInput()
+            : _buildMainContent(categories, bannerItems, watchHistory);
+
     return HomeFocusAnchors(
       bannerPlay: _bannerPlayFocus,
-      topNavFirst: _topNavFirstFocus,
+      navFirst: _sideNavFirstFocus,
       ensureBannerVisible: _ensureBannerVisible,
       child: Scaffold(
-      body: SafeArea(
-        top: isMobile,
-        bottom: false,
-        child: Stack(
-          children: [
-            // 主内容
-            _restoring
-                ? _buildLoadingState()
-                : sites.isEmpty
-                    ? _buildSourceInput()
-                    : _buildMainContent(
-                        categories, bannerItems, watchHistory),
-            // 顶部导航栏（桌面/TV 端）
-            if (!isMobile)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Material(
-                  type: MaterialType.transparency,
-                  child: TopNavBar(
-                    selectedIndex: 0,
-                    onItemSelected: (index) {
-                      if (index == 2) context.push('/search');
-                      if (index == 3) context.push('/settings');
-                    },
-                    isOpaque: _navOpaque,
-                    firstItemFocusNode: _topNavFirstFocus,
-                    downAnchor: _bannerPlayFocus,
-                  ),
+        body: SafeArea(
+          top: isMobile,
+          bottom: false,
+          child: isMobile
+              ? mainContent
+              // Stack：SideNav 收起 80dp 与 content padding 对齐；展开时
+              // 浮在内容之上覆盖到 240dp，不推动内容重新布局，避免视觉抖动
+              : Stack(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: AppSpacing.sideNavCollapsedWidth,
+                      ),
+                      child: mainContent,
+                    ),
+                    Positioned(
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      child: SideNavBar(
+                        selectedIndex: 0,
+                        firstItemFocusNode: _sideNavFirstFocus,
+                        onItemSelected: (index) {
+                          if (index == 2) context.push('/search');
+                          if (index == 3) context.push('/settings');
+                        },
+                        onExitToContent: () {
+                          _bannerPlayFocus.requestFocus();
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-          ],
         ),
+        // 底部导航栏（手机端）
+        bottomNavigationBar: isMobile
+            ? BottomNavigationBar(
+                currentIndex: 0,
+                onTap: (index) {
+                  if (index == 1) context.push('/search');
+                  if (index == 2) context.push('/settings');
+                },
+                type: BottomNavigationBarType.fixed,
+                backgroundColor: AppColors.deepBlack,
+                selectedItemColor: AppColors.netflixRed,
+                unselectedItemColor: AppColors.secondaryText,
+                selectedFontSize: 12,
+                unselectedFontSize: 12,
+                items: const [
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.home),
+                    label: '首页',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.search),
+                    label: '搜索',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.settings),
+                    label: '设置',
+                  ),
+                ],
+              )
+            : null,
       ),
-      // 底部导航栏（手机端）
-      bottomNavigationBar: isMobile
-          ? BottomNavigationBar(
-              currentIndex: 0,
-              onTap: (index) {
-                if (index == 1) context.push('/search');
-                if (index == 2) context.push('/settings');
-              },
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: AppColors.deepBlack,
-              selectedItemColor: AppColors.netflixRed,
-              unselectedItemColor: AppColors.secondaryText,
-              selectedFontSize: 12,
-              unselectedFontSize: 12,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.home),
-                  label: '首页',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.search),
-                  label: '搜索',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.settings),
-                  label: '设置',
-                ),
-              ],
-            )
-          : null,
-    ),
     );
   }
 
@@ -412,7 +408,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                   showProgress: true,
                   histories: histories,
+                  isFirstRail: true,
                   onItemSelected: _navigateToDetail,
+                  onViewMore: () => context.push('/history'),
                 ),
               ),
 
@@ -421,8 +419,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   final cat = dynamicCategories[index];
+                  // 没有「继续观看」时，dynamicCategories[0] 是首条 rail
+                  final isFirst = histories.isEmpty && index == 0;
                   return _CategoryRailWrapper(
                     category: cat,
+                    isFirstRail: isFirst,
                     onItemSelected: _navigateToDetail,
                   );
                 },
@@ -488,11 +489,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 /// 分类行包装器（独立消费 categoryItemsProvider）
 class _CategoryRailWrapper extends ConsumerWidget {
   final Category category;
+  final bool isFirstRail;
   final void Function(VideoItem item) onItemSelected;
 
   const _CategoryRailWrapper({
     required this.category,
     required this.onItemSelected,
+    this.isFirstRail = false,
   });
 
   @override
@@ -509,6 +512,7 @@ class _CategoryRailWrapper extends ConsumerWidget {
     return CategoryRail(
       category: category,
       items: items.whenData((result) => result.items),
+      isFirstRail: isFirstRail,
       onItemSelected: onItemSelected,
       onRetry: () => ref.invalidate(categoryItemsProvider(category.id)),
       onViewMore: site != null

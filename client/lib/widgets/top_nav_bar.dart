@@ -111,8 +111,10 @@ class _NavItemState extends State<_NavItem> {
           widget.onTap();
           return KeyEventResult.handled;
         }
-        // 按下键显式跳到 downAnchor（首页里是 Banner 播放按钮），
-        // 避免默认方向焦点策略按几何距离跳过 Banner 直达 Rail
+        // ↓ 直接跳 downAnchor（首页里是 Banner Play 按钮）。
+        // 不能走「几何优先」：顶栏项位于屏幕顶部，按几何下行会落到同 X 坐标
+        // 的 rail 卡（如「首页」按钮在右上 → 落到「继续观看」末张卡），
+        // 跳过 Banner，违反语义（顶栏 ↓ = 退出顶栏进入主内容入口）。
         if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
             widget.downAnchor != null) {
           widget.downAnchor!.requestFocus();
@@ -134,30 +136,41 @@ class _NavItemState extends State<_NavItem> {
               borderRadius: BorderRadius.circular(4),
               border: Border.all(
                 color: _focused ? AppColors.netflixRed : Colors.transparent,
-                width: 1,
+                width: 2,
               ),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  widget.label,
-                  style: AppTypography.body.copyWith(
-                    color: highlighted
-                        ? AppColors.primaryText
-                        : AppColors.secondaryText,
-                    fontWeight: highlighted ? FontWeight.w600 : FontWeight.normal,
+            // IntrinsicWidth + stretch：让 underline Container 跟随 Text 宽度。
+            // 不加的话 Container 没 width / child，crossAxis 默认 center 会塌成 0 宽，
+            // 下划线消失。
+            child: IntrinsicWidth(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    widget.label,
+                    textAlign: TextAlign.center,
+                    style: AppTypography.body.copyWith(
+                      color: highlighted
+                          ? AppColors.primaryText
+                          : AppColors.secondaryText,
+                      fontWeight:
+                          highlighted ? FontWeight.w600 : FontWeight.normal,
+                    ),
                   ),
-                ),
-                // 选中下划线
-                Container(
-                  height: 2,
-                  width: 24,
-                  color: widget.isSelected
-                      ? AppColors.netflixRed
-                      : Colors.transparent,
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  // 选中下划线（宽随文字）
+                  Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: widget.isSelected
+                          ? AppColors.netflixRed
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(1.5),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -29,7 +29,7 @@ class HeroBanner extends StatefulWidget {
   const HeroBanner({
     super.key,
     required this.items,
-    this.autoPlayInterval = const Duration(seconds: 6),
+    this.autoPlayInterval = const Duration(seconds: 8),
     required this.onItemFocused,
     required this.onItemSelected,
     required this.onItemPlay,
@@ -109,27 +109,42 @@ class _HeroBannerState extends State<HeroBanner> {
       k == LogicalKeyboardKey.select ||
       k == LogicalKeyboardKey.gameButtonA;
 
-  /// 播放 / 详情按钮键处理：
-  /// - Enter/OK → 调 [onActivate]（onKeyEvent 挂在主焦点节点上，按钮自身
-  ///   不再消费 Activate，必须显式处理）
-  /// - 上 → 跳到顶栏首项（默认方向焦点策略常因几何距离过远找不到顶栏）
-  /// - 左/右 → 交给默认焦点流，走到箭头按钮上再 Enter 切换 banner
+  /// 播放 / 详情按钮键处理（SideNav 模式下）：
+  /// - Enter/OK → 调 [onActivate]
+  /// - ↑ → 默认（无顶栏；焦点保持）
+  /// - Play 焦点 + ← → 进 SideNav（Play 是 Banner 最左焦点节点，向左退到导航）
+  /// - Detail 焦点 + → → 切下一片（Detail 右侧只剩右箭头按钮，截胡更顺手）
+  /// - Play+→ / Detail+← → 默认（Play↔Detail 互跳）
+  ///
+  /// 注：Banner 切上一片不再走 Play+←（让位给 SideNav）。用户改用：
+  /// 自动轮播 / 鼠标点左箭头 / 指示器点击。
   KeyEventResult _handleBannerButtonKey(
     KeyEvent event,
-    VoidCallback onActivate,
-  ) {
+    VoidCallback onActivate, {
+    required bool isPlayButton,
+  }) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (_isActivateKey(event.logicalKey)) {
       onActivate();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      return KeyEventResult.ignored;
+    }
+    if (isPlayButton &&
+        event.logicalKey == LogicalKeyboardKey.arrowLeft) {
       final anchor = HomeFocusAnchors.of(context);
       if (anchor != null) {
-        anchor.topNavFirst.requestFocus();
+        anchor.navFirst.requestFocus();
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
+    }
+    if (widget.items.length > 1 &&
+        !isPlayButton &&
+        event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _goNext();
+      return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
   }
@@ -150,6 +165,7 @@ class _HeroBannerState extends State<HeroBanner> {
     FocusNode? focusNode,
     bool autofocus = false,
     required bool focused,
+    required bool isPlayButton,
     required ValueChanged<bool> onFocusChanged,
     required VoidCallback onActivate,
     required Widget child,
@@ -158,7 +174,8 @@ class _HeroBannerState extends State<HeroBanner> {
       focusNode: focusNode,
       autofocus: autofocus,
       onFocusChange: onFocusChanged,
-      onKeyEvent: (node, event) => _handleBannerButtonKey(event, onActivate),
+      onKeyEvent: (node, event) =>
+          _handleBannerButtonKey(event, onActivate, isPlayButton: isPlayButton),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.all(2),
@@ -309,6 +326,7 @@ class _HeroBannerState extends State<HeroBanner> {
                             focusNode: widget.playFocusNode,
                             autofocus: widget.autofocus && !_isLoadingPlay,
                             focused: _playFocused,
+                            isPlayButton: true,
                             onFocusChanged: (hasFocus) {
                               setState(() => _playFocused = hasFocus);
                               if (!_isLoadingPlay) _paused = hasFocus;
@@ -345,6 +363,7 @@ class _HeroBannerState extends State<HeroBanner> {
                           ),
                           _focusableBannerButton(
                             focused: _detailFocused,
+                            isPlayButton: false,
                             onFocusChanged: (hasFocus) {
                               setState(() => _detailFocused = hasFocus);
                               _paused = hasFocus;

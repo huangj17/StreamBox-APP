@@ -24,6 +24,9 @@ class CategoryRail extends StatefulWidget {
   final VoidCallback? onViewMore;
   final bool showProgress;
   final List<WatchHistory> histories;
+  /// 首条 rail（紧邻 Banner）：内部卡片 ↑ 兜底 Banner Play。其它 rail 走默认
+  /// 几何上行，让 Flutter 按几何挑上一行同列卡片。
+  final bool isFirstRail;
 
   const CategoryRail({
     super.key,
@@ -35,6 +38,7 @@ class CategoryRail extends StatefulWidget {
     this.onViewMore,
     this.showProgress = false,
     this.histories = const [],
+    this.isFirstRail = false,
   });
 
   @override
@@ -205,9 +209,17 @@ class _CategoryRailState extends State<CategoryRail> {
           onRightEdge: _viewMoreFocus != null
               ? () => _viewMoreFocus!.requestFocus()
               : null,
-          // 任意卡片按 ↑ 直接跳本 rail「更多」按钮（无「更多」时走默认几何 + Banner 兜底）
-          onUpEdge: _viewMoreFocus != null
-              ? () => _viewMoreFocus!.requestFocus()
+          // 首条 rail 没有上一行可去，↑ 兜底 Banner Play；其它 rail 不传，
+          // 让 VideoCard 走默认几何上行，按列位置落到上一 rail 同列附近卡片
+          // （符合 ui-design.md §6.1「跨 Rail 记忆该行上次聚焦的列位置」）
+          onUpEdge: widget.isFirstRail
+              ? () {
+                  final anchor = HomeFocusAnchors.of(context);
+                  if (anchor != null) {
+                    anchor.bannerPlay.requestFocus();
+                    anchor.ensureBannerVisible();
+                  }
+                }
               : null,
         );
       },
@@ -256,17 +268,10 @@ class _ViewMoreButtonState extends State<_ViewMoreButton> {
           widget.onTap();
           return KeyEventResult.handled;
         }
-        // ↑：优先几何上行；失败则兜底 Banner 播放按钮（与 VideoCard 对齐）
+        // ↑：「更多」按钮位于 rail 标题区，几何上行落点不稳定（多 rail
+        // 排布会让默认策略落到上一 rail 任意卡片）。直接兜底 Banner Play，
+        // 行为统一可预测。
         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-          final moved =
-              FocusScope.of(context).focusInDirection(TraversalDirection.up);
-          if (moved) {
-            final anchor = HomeFocusAnchors.of(context);
-            if (anchor != null && anchor.bannerPlay.hasPrimaryFocus) {
-              anchor.ensureBannerVisible();
-            }
-            return KeyEventResult.handled;
-          }
           final anchor = HomeFocusAnchors.of(context);
           if (anchor != null) {
             anchor.bannerPlay.requestFocus();

@@ -118,7 +118,19 @@ class _VideoCardState extends State<VideoCard> {
           widget.onRightEdge!();
           return KeyEventResult.handled;
         }
-        // 向下、向左：完全交给 Flutter 默认方向焦点策略
+        // 向左：默认先试（rail 内左移）；rail 首张找不到候选时兜底进 SideNav
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          final moved =
+              FocusScope.of(context).focusInDirection(TraversalDirection.left);
+          if (moved) return KeyEventResult.handled;
+          final anchor = HomeFocusAnchors.of(context);
+          if (anchor != null) {
+            anchor.navFirst.requestFocus();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        }
+        // 向下：完全交给 Flutter 默认方向焦点策略
         return KeyEventResult.ignored;
       },
       child: MouseRegion(
