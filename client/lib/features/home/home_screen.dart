@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
@@ -10,6 +11,7 @@ import '../../data/models/video_item.dart';
 import '../../data/models/watch_history.dart';
 import '../../widgets/side_nav_bar.dart';
 import '../../widgets/skeleton_card.dart';
+import '../../widgets/tv_focus.dart';
 import '../../core/platform/platform_service.dart';
 import 'providers/categories_provider.dart';
 import '../source/providers/source_provider.dart';
@@ -27,11 +29,12 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final _urlController = TextEditingController();
   final _scrollController = ScrollController();
-  // 焦点锚点：Banner Play 是内容入口；navFirst 是 SideNav 首项
+  // 焦点锚点：Banner Play 是内容入口；navFirst 是 SideNav 首项；
+  // errorRetry 是错误态「重试」按钮（仅错误态被 widget attach）
   final _bannerPlayFocus = FocusNode(debugLabel: 'banner-play');
   final _sideNavFirstFocus = FocusNode(debugLabel: 'side-nav-home');
+  final _errorRetryFocus = FocusNode(debugLabel: 'error-retry');
   bool _restoring = true; // 启动时恢复状态中，避免闪现输入界面
 
   @override
@@ -43,10 +46,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   void dispose() {
-    _urlController.dispose();
     _scrollController.dispose();
     _bannerPlayFocus.dispose();
     _sideNavFirstFocus.dispose();
+    _errorRetryFocus.dispose();
     super.dispose();
   }
 
@@ -110,13 +113,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     if (mounted) setState(() => _restoring = false);
-  }
-
-  void _loadSource() {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
-    final site = Site.fromUrl(url);
-    ref.read(sitesProvider.notifier).state = [site];
   }
 
   void _navigateToDetail(VideoItem video) {
@@ -216,6 +212,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return HomeFocusAnchors(
       bannerPlay: _bannerPlayFocus,
       navFirst: _sideNavFirstFocus,
+      errorRetry: _errorRetryFocus,
       ensureBannerVisible: _ensureBannerVisible,
       child: Scaffold(
         body: SafeArea(
@@ -245,6 +242,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           if (index == 3) context.push('/settings');
                         },
                         onExitToContent: () {
+                          // 错误态优先聚 Retry（避免焦点掉进未渲染的 Banner）
+                          if (_errorRetryFocus.context != null &&
+                              _errorRetryFocus.canRequestFocus) {
+                            _errorRetryFocus.requestFocus();
+                            return;
+                          }
                           _bannerPlayFocus.requestFocus();
                         },
                       ),
@@ -286,7 +289,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// 未配置源时显示输入界面
+  /// 未配置源时显示空态：直接引导去设置添加源（替代原 TextField，TV 焦点路由更顺）
+  /// 复用 [_errorRetryFocus] 锚点，让 SideNav→ 退出能落到这里
   Widget _buildSourceInput() {
     return Center(
       child: Padding(
@@ -299,48 +303,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               style: AppTypography.display.copyWith(color: AppColors.netflixRed),
             ),
             const SizedBox(height: AppSpacing.lg),
-            Text(
-              '输入苹果 CMS API 地址开始使用',
-              style: AppTypography.body,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            SizedBox(
-              width: 600,
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _urlController,
-                      decoration: InputDecoration(
-                        hintText: 'https://api.example.com/api.php/provide/vod/',
-                        hintStyle: AppTypography.body.copyWith(color: AppColors.hintText),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: const BorderSide(color: AppColors.divider),
-                        ),
-                        filled: true,
-                        fillColor: AppColors.cardBackground,
-                        isDense: true,
-                      ),
-                      style: AppTypography.body.copyWith(color: AppColors.primaryText),
-                      onSubmitted: (_) => _loadSource(),
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  ElevatedButton(
-                    onPressed: _loadSource,
-                    child: const Text('加载'),
-                  ),
-                ],
-              ),
+            const Icon(
+              Icons.video_library_outlined,
+              color: AppColors.hintText,
+              size: 56,
             ),
             const SizedBox(height: AppSpacing.md),
-            TextButton(
-              onPressed: () => context.push('/source'),
-              child: Text(
-                '管理配置源',
-                style: AppTypography.body.copyWith(color: AppColors.netflixRed),
+            Text(
+              '还没有配置片源',
+              style: AppTypography.body,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '前往设置 → 配置源管理添加源',
+              style: AppTypography.caption.copyWith(
+                color: AppColors.hintText,
               ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            _ErrorActionButton(
+              label: '去添加配置源',
+              primary: true,
+              autofocus: true,
+              focusNode: _errorRetryFocus,
+              onActivate: () => context.push('/source'),
+              onLeftEscape: PlatformService.needsFocusSystem
+                  ? () => _sideNavFirstFocus.requestFocus()
+                  : null,
             ),
           ],
         ),
@@ -460,28 +449,111 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           const Icon(Icons.error_outline, color: AppColors.hintText, size: 48),
           const SizedBox(height: AppSpacing.md),
-          Text('$error', style: AppTypography.body),
+          Text('$error', style: AppTypography.body, textAlign: TextAlign.center),
           const SizedBox(height: AppSpacing.lg),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ElevatedButton(
-                onPressed: () => ref.invalidate(categoriesProvider),
-                child: const Text('重试'),
+              _ErrorActionButton(
+                label: '重试',
+                primary: true,
+                autofocus: true,
+                focusNode: _errorRetryFocus,
+                onActivate: () => ref.invalidate(categoriesProvider),
+                // 最左按钮：← 显式回 SideNav 首项（mobile 无 SideNav 不传）
+                onLeftEscape: PlatformService.needsFocusSystem
+                    ? () => _sideNavFirstFocus.requestFocus()
+                    : null,
               ),
               const SizedBox(width: AppSpacing.md),
-              ElevatedButton(
-                onPressed: () => context.push('/source'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.surface,
-                  foregroundColor: AppColors.primaryText,
-                ),
-                child: const Text('去设置'),
+              _ErrorActionButton(
+                label: '去设置',
+                primary: false,
+                onActivate: () => context.push('/source'),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 首页错误态按钮：TvFocusable 红环+光晕，与全站 TV 视觉一致
+class _ErrorActionButton extends StatelessWidget {
+  final String label;
+  final bool primary;
+  final bool autofocus;
+  final FocusNode? focusNode;
+  final VoidCallback onActivate;
+  /// 按 ← 时退出到 SideNav（仅最左按钮传，确保焦点稳定回左栏）
+  final VoidCallback? onLeftEscape;
+
+  const _ErrorActionButton({
+    required this.label,
+    required this.primary,
+    required this.onActivate,
+    this.autofocus = false,
+    this.focusNode,
+    this.onLeftEscape,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final core = TvFocusable(
+      debugLabel: 'error-action-$label',
+      autofocus: autofocus,
+      focusNode: focusNode,
+      onActivate: onActivate,
+      ensureVisibleOnFocus: false,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+          decoration: BoxDecoration(
+            color: primary ? AppColors.netflixRed : AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused
+                  ? AppColors.primaryText
+                  : (primary ? AppColors.netflixRed : AppColors.divider),
+              width: focused ? 1.5 : 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(120),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: AppTypography.body.copyWith(
+              color: AppColors.primaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        );
+      },
+    );
+
+    // skipTraversal Focus 仅截 ← 冒泡，不抢焦点：
+    // 内层 TvFocusable 的 Focus 先看 KeyEvent，不消耗 ← → 冒到外层触发逃逸
+    if (onLeftEscape == null) return core;
+    return Focus(
+      skipTraversal: true,
+      onKeyEvent: (node, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          onLeftEscape!();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: core,
     );
   }
 }

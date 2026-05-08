@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import '../core/theme/app_spacing.dart';
 import '../core/theme/app_typography.dart';
+import 'tv_focus.dart';
 
 /// 行级错误组件
 /// 单行加载失败时显示，不影响其他行
+/// TV 焦点态：红边框+光晕；OK/Enter/GameA 触发 [onRetry]
 class ErrorRail extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
@@ -20,23 +22,55 @@ class ErrorRail extends StatelessWidget {
     return SizedBox(
       height: AppSpacing.cardHeight,
       child: Center(
-        child: GestureDetector(
-          onTap: onRetry,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.error_outline,
-                color: AppColors.hintText,
-                size: 36,
+        child: TvFocusable(
+          debugLabel: 'error-rail-retry',
+          onActivate: onRetry,
+          ensureVisibleOnFocus: false,
+          builder: (context, focused) {
+            final accent =
+                focused ? AppColors.netflixRed : AppColors.hintText;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              constraints: const BoxConstraints(minWidth: 240),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.md,
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                message,
-                style: AppTypography.body.copyWith(color: AppColors.hintText),
+              decoration: BoxDecoration(
+                color: focused
+                    ? AppColors.surface
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: focused
+                      ? AppColors.netflixRed
+                      : Colors.transparent,
+                  width: 1,
+                ),
+                boxShadow: focused
+                    ? [
+                        BoxShadow(
+                          color: AppColors.netflixRed.withAlpha(100),
+                          blurRadius: 12,
+                          spreadRadius: 1,
+                        ),
+                      ]
+                    : null,
               ),
-            ],
-          ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.error_outline, color: accent, size: 36),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: AppTypography.body.copyWith(color: accent),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +29,58 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
   String? _loadingUrl; // 正在加载的源 URL
   bool _builtInExpanded = true; // 内置片源是否展开（默认展开）
 
+  /// 每个 tile 一个 FocusNode，按 URL 索引；新增源后用来 requestFocus 落点
+  final Map<String, FocusNode> _tileFocusNodes = {};
+
+  /// inline 状态条（替代 SnackBar，TV 视野内顶端浮层，4s 后自动淡出）
+  String? _statusMessage;
+  bool _statusError = false;
+  Timer? _statusTimer;
+
+  FocusNode _focusNodeFor(String url) {
+    return _tileFocusNodes.putIfAbsent(
+      url,
+      () => FocusNode(debugLabel: 'source-tile-$url'),
+    );
+  }
+
+  void _setStatus(String msg, {bool error = false}) {
+    if (!mounted) return;
+    _statusTimer?.cancel();
+    setState(() {
+      _statusMessage = msg;
+      _statusError = error;
+    });
+    _statusTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() => _statusMessage = null);
+    });
+  }
+
+  @override
+  void dispose() {
+    _statusTimer?.cancel();
+    for (final n in _tileFocusNodes.values) {
+      n.dispose();
+    }
+    _tileFocusNodes.clear();
+    super.dispose();
+  }
+
+  /// 调度下一帧把焦点 + 滚动落到 [url] 对应 tile。
+  /// 调用时 ListView 通常还未把新 tile 渲染出来；postFrameCallback 等
+  /// 重建完成 + FocusNode attach 完成后再 requestFocus。
+  void _focusTileAfterFrame(String url) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final node = _tileFocusNodes[url];
+      if (node != null && node.canRequestFocus) {
+        node.requestFocus();
+        // TvFocusable 的 ensureVisibleOnFocus 会自动 scroll 到中间
+      }
+    });
+  }
+
   Future<void> _openAddSourceDialog() async {
     final url = await showDialog<String>(
       context: context,
@@ -43,6 +97,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
 
     setState(() => _loading = true);
 
+    bool added = false;
     try {
       // 保存 URL
       final urls = ref.read(savedSourceUrlsProvider);
@@ -52,6 +107,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
           trimmed,
         ];
       }
+      added = true;
 
       // 存储到 Hive
       final storage = ref.read(sourceStorageProvider);
@@ -65,11 +121,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
       if (trimmed.contains(':9978')) {
         await ref.read(sourceConfigProvider.future);
         syncSitesToHome(ref);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bridge 源加载成功')),
-          );
-        }
+        _setStatus('Bridge 源加载成功');
         setState(() => _loading = false);
         return;
       }
@@ -79,31 +131,19 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
 
       if (warehouses.isNotEmpty) {
         // 多仓：提示用户选择仓库
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content:
-                    Text('多仓源已加载，共 ${warehouses.length} 个仓库，请选择')),
-          );
-        }
+        _setStatus('多仓源已加载，共 ${warehouses.length} 个仓库，请选择');
       } else {
         // 单仓：直接加载
         await ref.read(sourceConfigProvider.future);
         syncSitesToHome(ref);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('配置源加载成功')),
-          );
-        }
+        _setStatus('配置源加载成功');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('加载失败: $e')),
-        );
-      }
+      _setStatus('加载失败: $e', error: true);
     } finally {
       if (mounted) setState(() => _loading = false);
+      // URL 已加入 list（无论后续配置加载是否成功），把焦点落到新 tile
+      if (added && mounted) _focusTileAfterFrame(trimmed);
     }
   }
 
@@ -167,6 +207,9 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     final storage = ref.read(sourceStorageProvider);
     await storage.remove(url);
 
+    // 释放该 tile 的 FocusNode（避免 widget 卸载后 leak）
+    _tileFocusNodes.remove(url)?.dispose();
+
     // 如果删除的是当前选中的，清空
     if (ref.read(selectedSourceUrlProvider) == url) {
       ref.read(selectedSourceUrlProvider.notifier).state = null;
@@ -187,6 +230,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
         warehousesAsync.value!.isNotEmpty;
     return _SourceTile(
       url: url,
+      focusNode: _focusNodeFor(url),
       isSelected: isSelected,
       isLoading: _loadingUrl == url,
       isMultiWarehouse: isMultiWarehouse,
@@ -213,7 +257,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
       onActivate: _loading ? null : _openAddSourceDialog,
     );
 
-    final body = Padding(
+    final content = Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,11 +351,83 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
       ),
     );
 
+    final body = Stack(
+      children: [
+        Positioned.fill(child: content),
+        if (_statusMessage != null)
+          Positioned(
+            top: AppSpacing.md,
+            left: AppSpacing.lg,
+            right: AppSpacing.lg,
+            child: _StatusBanner(
+              text: _statusMessage!,
+              error: _statusError,
+            ),
+          ),
+      ],
+    );
+
     if (widget.embedded) return body;
 
     return Scaffold(
       appBar: AppBar(title: const Text('配置源管理')),
       body: body,
+    );
+  }
+}
+
+/// inline 状态条：替代 SnackBar 的 TV 友好版本（顶端浮层，不依赖底部
+/// ScaffoldMessenger 视野）。错误用 warning 色，正常用 success 色。
+class _StatusBanner extends StatelessWidget {
+  final String text;
+  final bool error;
+
+  const _StatusBanner({required this.text, required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = error ? AppColors.warning : AppColors.success;
+    return IgnorePointer(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withAlpha(160), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(80),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                error ? Icons.error_outline : Icons.check_circle_outline,
+                color: color,
+                size: 18,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Flexible(
+                child: Text(
+                  text,
+                  style: AppTypography.body.copyWith(
+                    color: AppColors.primaryText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -369,7 +485,7 @@ class _WarehousePicker extends StatelessWidget {
   }
 }
 
-class _WarehouseChip extends StatefulWidget {
+class _WarehouseChip extends StatelessWidget {
   final String name;
   final bool isSelected;
   final bool isLoading;
@@ -383,43 +499,26 @@ class _WarehouseChip extends StatefulWidget {
   });
 
   @override
-  State<_WarehouseChip> createState() => _WarehouseChipState();
-}
-
-class _WarehouseChipState extends State<_WarehouseChip> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
+    return TvFocusable(
+      debugLabel: 'warehouse-chip-$name',
+      onActivate: onTap,
+      builder: (context, focused) {
+        return AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: widget.isSelected
+            color: isSelected
                 ? AppColors.netflixRed.withAlpha(30)
                 : AppColors.cardBackground,
             borderRadius: BorderRadius.circular(19),
             border: Border.all(
-              color: widget.isSelected || _focused
+              color: isSelected || focused
                   ? AppColors.netflixRed
                   : AppColors.divider,
               width: 1,
             ),
-            boxShadow: _focused
+            boxShadow: focused
                 ? [
                     BoxShadow(
                       color: AppColors.netflixRed.withAlpha(100),
@@ -432,13 +531,13 @@ class _WarehouseChipState extends State<_WarehouseChip> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (widget.isLoading) ...[
+              if (isLoading) ...[
                 SizedBox(
                   width: 12,
                   height: 12,
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
-                    color: widget.isSelected
+                    color: isSelected
                         ? AppColors.netflixRed
                         : AppColors.primaryText,
                   ),
@@ -446,19 +545,19 @@ class _WarehouseChipState extends State<_WarehouseChip> {
                 const SizedBox(width: 6),
               ],
               Text(
-                widget.name,
+                name,
                 style: AppTypography.caption.copyWith(
-                  color: widget.isSelected
+                  color: isSelected
                       ? AppColors.netflixRed
                       : AppColors.primaryText,
                   fontWeight:
-                      widget.isSelected ? FontWeight.w600 : FontWeight.normal,
+                      isSelected ? FontWeight.w600 : FontWeight.normal,
                 ),
               ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -525,6 +624,7 @@ class _ExpandToggleRow extends StatelessWidget {
 /// - 第三方源支持「长按 OK 删除」（≥500ms），短按/Enter 仍是切换选中
 class _SourceTile extends StatelessWidget {
   final String url;
+  final FocusNode? focusNode;
   final bool isSelected;
   final bool isLoading;
   final bool isMultiWarehouse;
@@ -537,6 +637,7 @@ class _SourceTile extends StatelessWidget {
     required this.isLoading,
     required this.isMultiWarehouse,
     required this.onTap,
+    this.focusNode,
     this.onDelete,
   });
 
@@ -547,6 +648,7 @@ class _SourceTile extends StatelessWidget {
 
     return TvFocusable(
       debugLabel: 'source-tile-$url',
+      focusNode: focusNode,
       onActivate: onTap,
       onLongActivate: onDelete,
       builder: (context, focused) {
@@ -797,7 +899,7 @@ class _BridgePluginPickerState extends ConsumerState<_BridgePluginPicker> {
   }
 }
 
-class _BridgeChip extends StatefulWidget {
+class _BridgeChip extends StatelessWidget {
   final String name;
   final bool isSelected;
   final VoidCallback onTap;
@@ -809,42 +911,25 @@ class _BridgeChip extends StatefulWidget {
   });
 
   @override
-  State<_BridgeChip> createState() => _BridgeChipState();
-}
-
-class _BridgeChipState extends State<_BridgeChip> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
+    return TvFocusable(
+      debugLabel: 'bridge-chip-$name',
+      onActivate: onTap,
+      builder: (context, focused) {
+        return AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            color: widget.isSelected
+            color: isSelected
                 ? AppColors.netflixRed
                 : AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: widget.isSelected || _focused
+              color: isSelected || focused
                   ? AppColors.netflixRed
                   : AppColors.divider,
             ),
-            boxShadow: _focused
+            boxShadow: focused
                 ? [
                     BoxShadow(
                       color: AppColors.netflixRed.withAlpha(100),
@@ -855,15 +940,15 @@ class _BridgeChipState extends State<_BridgeChip> {
                 : null,
           ),
           child: Text(
-            widget.name,
+            name,
             style: AppTypography.caption.copyWith(
-              color: widget.isSelected ? Colors.white : AppColors.primaryText,
+              color: isSelected ? Colors.white : AppColors.primaryText,
               fontWeight:
-                  widget.isSelected ? FontWeight.bold : FontWeight.normal,
+                  isSelected ? FontWeight.bold : FontWeight.normal,
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -997,6 +1082,8 @@ class _AddSourceDialog extends StatefulWidget {
 class _AddSourceDialogState extends State<_AddSourceDialog> {
   final _controller = TextEditingController();
   final FocusNode _inputFocus = FocusNode(debugLabel: 'add-source-input');
+  final FocusNode _cancelFocus = FocusNode(debugLabel: 'add-source-cancel');
+  final FocusNode _confirmFocus = FocusNode(debugLabel: 'add-source-confirm');
   bool _inputFocused = false;
 
   @override
@@ -1009,6 +1096,8 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
   void dispose() {
     _inputFocus.removeListener(_onInputFocus);
     _inputFocus.dispose();
+    _cancelFocus.dispose();
+    _confirmFocus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -1028,6 +1117,49 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
     Navigator.of(context).pop();
   }
 
+  /// D-pad 路由：
+  /// - input ↓ → 确定（按钮主操作）
+  /// - 按钮 ↑ → input
+  /// - 取消 → → 确定；确定 ← → 取消（TextField 内 ←→ 不拦截，光标移动正常）
+  /// - Esc/Back/GameB → 取消（任意 focus）
+  KeyEventResult _onDialogKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.browserBack ||
+        key == LogicalKeyboardKey.gameButtonB) {
+      _cancel();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      if (_inputFocus.hasFocus) {
+        _confirmFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      if (_confirmFocus.hasFocus || _cancelFocus.hasFocus) {
+        _inputFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    // ←→ 仅在按钮间切换；TextField focus 时让光标正常移动
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      if (_confirmFocus.hasFocus) {
+        _cancelFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      if (_cancelFocus.hasFocus) {
+        _confirmFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -1035,12 +1167,8 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
-      child: CallbackShortcuts(
-        bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.escape): _cancel,
-          const SingleActivator(LogicalKeyboardKey.browserBack): _cancel,
-          const SingleActivator(LogicalKeyboardKey.gameButtonB): _cancel,
-        },
+      child: Focus(
+        onKeyEvent: _onDialogKey,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
@@ -1050,7 +1178,7 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
               Text('添加配置源', style: AppTypography.headline2),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                '支持苹果 CMS API、TVBox 单仓/多仓配置源 URL',
+                '支持苹果 CMS API、TVBox 单仓/多仓配置源 URL · ↓ 到按钮',
                 style: AppTypography.caption
                     .copyWith(color: AppColors.hintText),
               ),
@@ -1107,12 +1235,14 @@ class _AddSourceDialogState extends State<_AddSourceDialog> {
                 children: [
                   _DialogButton(
                     label: '取消',
+                    focusNode: _cancelFocus,
                     onActivate: _cancel,
                     primary: false,
                   ),
                   const SizedBox(width: AppSpacing.md),
                   _DialogButton(
                     label: '确定',
+                    focusNode: _confirmFocus,
                     onActivate: _confirm,
                     primary: true,
                   ),
@@ -1130,17 +1260,20 @@ class _DialogButton extends StatelessWidget {
   final String label;
   final VoidCallback onActivate;
   final bool primary;
+  final FocusNode? focusNode;
 
   const _DialogButton({
     required this.label,
     required this.onActivate,
     required this.primary,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
       debugLabel: 'dialog-btn-$label',
+      focusNode: focusNode,
       onActivate: onActivate,
       builder: (context, focused) {
         return AnimatedContainer(
