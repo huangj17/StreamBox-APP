@@ -9,6 +9,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../data/cover/providers.dart';
+import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import '../source/source_manage_page.dart';
 import '../favorites/favorites_screen.dart';
@@ -52,6 +53,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   _SettingsSection get _effectiveSelected =>
       _selected ?? _SettingsSection.source;
 
+  /// 右栏 traversal 锚点 — 不参与遍历但作为 [nextFocus] 起点。
+  /// 不用 [FocusScope]：FocusScope 是 directional traversal 边界，会让 ← 进不到左栏。
+  final FocusNode _rightAnchor = FocusNode(
+    debugLabel: 'settings-right-anchor',
+    skipTraversal: true,
+    canRequestFocus: false,
+  );
+
+  @override
+  void dispose() {
+    _rightAnchor.dispose();
+    super.dispose();
+  }
+
+  void _selectSection(_SettingsSection s) {
+    setState(() => _selected = s);
+    if (!PlatformService.needsFocusSystem) return;
+    // 等右栏内容重建后再请求焦点
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _rightAnchor.nextFocus();
+    });
+  }
+
   static const _sections = [
     _SettingsSection.source,
     _SettingsSection.player,
@@ -83,7 +108,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 icon: s.icon,
                 label: s.label,
                 isSelected: false,
-                onTap: () => setState(() => _selected = s),
+                onTap: () => _selectSection(s),
               ),
             const Padding(
               padding: EdgeInsets.symmetric(
@@ -96,8 +121,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               icon: _SettingsSection.about.icon,
               label: _SettingsSection.about.label,
               isSelected: false,
-              onTap: () =>
-                  setState(() => _selected = _SettingsSection.about),
+              onTap: () => _selectSection(_SettingsSection.about),
             ),
           ],
         ),
@@ -135,41 +159,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             width: AppSpacing.settingsSidebarWidth,
             child: Container(
               color: AppColors.cardBackground,
-              child: ListView(
-                padding:
-                    const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-                children: [
-                  for (final s in _sections)
+              child: FocusTraversalGroup(
+                policy: OrderedTraversalPolicy(),
+                child: ListView(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                  children: [
+                    for (final s in _sections)
+                      _SidebarItem(
+                        icon: s.icon,
+                        label: s.label,
+                        isSelected: _effectiveSelected == s,
+                        autofocus:
+                            autofocusSidebar && _effectiveSelected == s,
+                        onTap: () => _selectSection(s),
+                      ),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: AppSpacing.sm,
+                      ),
+                      child: Divider(color: AppColors.divider),
+                    ),
                     _SidebarItem(
-                      icon: s.icon,
-                      label: s.label,
-                      isSelected: _effectiveSelected == s,
-                      autofocus:
-                          autofocusSidebar && _effectiveSelected == s,
-                      onTap: () => setState(() => _selected = s),
+                      icon: _SettingsSection.about.icon,
+                      label: _SettingsSection.about.label,
+                      isSelected:
+                          _effectiveSelected == _SettingsSection.about,
+                      autofocus: autofocusSidebar &&
+                          _effectiveSelected == _SettingsSection.about,
+                      onTap: () => _selectSection(_SettingsSection.about),
                     ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.sm,
-                    ),
-                    child: Divider(color: AppColors.divider),
-                  ),
-                  _SidebarItem(
-                    icon: _SettingsSection.about.icon,
-                    label: _SettingsSection.about.label,
-                    isSelected: _effectiveSelected == _SettingsSection.about,
-                    autofocus: autofocusSidebar &&
-                        _effectiveSelected == _SettingsSection.about,
-                    onTap: () =>
-                        setState(() => _selected = _SettingsSection.about),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
           const VerticalDivider(width: 1, color: AppColors.divider),
-          Expanded(child: _buildDetailPanel()),
+          Expanded(
+            child: FocusTraversalGroup(
+              policy: ReadingOrderTraversalPolicy(),
+              child: Focus(
+                focusNode: _rightAnchor,
+                skipTraversal: true,
+                canRequestFocus: false,
+                child: _buildDetailPanel(),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -307,55 +344,216 @@ class _PlayerSettingsPanelState extends ConsumerState<_PlayerSettingsPanel> {
   Widget build(BuildContext context) {
     final storage = ref.watch(playerSettingsStorageProvider);
 
+    final isNative = PlatformService.isMobile || PlatformService.isTv;
+    final hwdecEnabled = isNative ? true : storage.hardwareDecode;
+
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         Text('播放器设置', style: AppTypography.headline2),
         const SizedBox(height: AppSpacing.lg),
 
-        // 硬件解码开关
-        //
-        // 移动 / TV 端走 video_player（ExoPlayer / AVPlayer），默认就是系统
-        // 硬解，该开关无意义 → 置灰。桌面端走 media_kit (libmpv)，开关控制
-        // libmpv 的 `hwdec` 属性（auto-safe vs no）。
-        () {
-          final isNative =
-              PlatformService.isMobile || PlatformService.isTv;
-          return _SettingsTile(
-            icon: Icons.memory,
-            title: '硬件解码',
-            subtitle: isNative
-                ? '移动 / TV 端始终硬解'
-                : storage.hardwareDecode
-                    ? '已开启（推荐）'
-                    : '已关闭（使用软件解码）',
-            trailing: Switch(
-              value: isNative ? true : storage.hardwareDecode,
-              activeThumbColor: AppColors.netflixRed,
-              activeTrackColor: AppColors.netflixRed.withAlpha(102),
-              onChanged: isNative
-                  ? null
-                  : (v) {
-                      setState(() => storage.hardwareDecode = v);
-                    },
-            ),
-          );
-        }(),
+        // 硬件解码开关 — TV 端 OK 切换；移动/TV 平台始终硬解时禁用
+        TvFocusable(
+          debugLabel: 'hwdec-toggle',
+          onActivate: isNative
+              ? null
+              : () =>
+                  setState(() => storage.hardwareDecode = !hwdecEnabled),
+          builder: (context, focused) {
+            return _FocusableTile(
+              focused: focused,
+              icon: Icons.memory,
+              title: '硬件解码',
+              subtitle: isNative
+                  ? '移动 / TV 端始终硬解'
+                  : hwdecEnabled
+                      ? '已开启（推荐）'
+                      : '已关闭（使用软件解码）',
+              trailing: ExcludeFocus(
+                child: Switch(
+                  value: hwdecEnabled,
+                  activeThumbColor: AppColors.netflixRed,
+                  activeTrackColor: AppColors.netflixRed.withAlpha(102),
+                  onChanged: isNative
+                      ? null
+                      : (v) =>
+                          setState(() => storage.hardwareDecode = v),
+                ),
+              ),
+            );
+          },
+        ),
         const Divider(color: AppColors.divider),
 
-        // 默认播放倍速
-        _SettingsTile(
-          icon: Icons.speed,
-          title: '默认播放倍速',
-          subtitle: '${storage.defaultSpeed}x',
-          trailing: _SpeedSelector(
-            value: storage.defaultSpeed,
-            onChanged: (v) {
-              setState(() => storage.defaultSpeed = v);
-            },
-          ),
+        // 默认播放倍速 — 横向 Chip 行，方向键选择
+        _SpeedRow(
+          value: storage.defaultSpeed,
+          onChanged: (v) => setState(() => storage.defaultSpeed = v),
         ),
       ],
+    );
+  }
+}
+
+/// 设置页内带焦点高亮的一行
+class _FocusableTile extends StatelessWidget {
+  final bool focused;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget trailing;
+
+  const _FocusableTile({
+    required this.focused,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: focused ? AppColors.netflixRed : Colors.transparent,
+          width: 1,
+        ),
+        boxShadow: focused
+            ? [
+                BoxShadow(
+                  color: AppColors.netflixRed.withAlpha(80),
+                  blurRadius: 12,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.secondaryText, size: 24),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppTypography.title),
+                const SizedBox(height: AppSpacing.xs),
+                Text(subtitle,
+                    style: AppTypography.caption
+                        .copyWith(color: AppColors.secondaryText)),
+              ],
+            ),
+          ),
+          trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// 倍速横向 Chip 行 — 替换原 DropdownButton（TV 上 Dropdown 体验差）
+class _SpeedRow extends StatelessWidget {
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  const _SpeedRow({required this.value, required this.onChanged});
+
+  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.speed,
+                  color: AppColors.secondaryText, size: 24),
+              const SizedBox(width: AppSpacing.md),
+              Text('默认播放倍速', style: AppTypography.title),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Padding(
+            padding: const EdgeInsets.only(left: 36),
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                for (final s in _speeds)
+                  _SpeedChip(
+                    speed: s,
+                    selected: s == value,
+                    onActivate: () => onChanged(s),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpeedChip extends StatelessWidget {
+  final double speed;
+  final bool selected;
+  final VoidCallback onActivate;
+
+  const _SpeedChip({
+    required this.speed,
+    required this.selected,
+    required this.onActivate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'speed-${speed}x',
+      onActivate: onActivate,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.netflixRed : AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: focused
+                  ? AppColors.netflixRed
+                  : (selected
+                      ? AppColors.netflixRed
+                      : AppColors.divider),
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            '${speed}x',
+            style: AppTypography.caption.copyWith(
+              color: selected ? Colors.white : AppColors.primaryText,
+              fontWeight:
+                  selected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -371,19 +569,41 @@ class _CoverSettingsPanel extends ConsumerStatefulWidget {
 
 class _CoverSettingsPanelState extends ConsumerState<_CoverSettingsPanel> {
   late final TextEditingController _tmdbCtrl;
+  final FocusNode _tmdbFocus = FocusNode(debugLabel: 'tmdb-key');
   bool _obscure = true;
+  bool _tmdbFocused = false;
 
   @override
   void initState() {
     super.initState();
     final storage = ref.read(appSettingsStorageProvider);
     _tmdbCtrl = TextEditingController(text: storage.tmdbApiKey);
+    _tmdbFocus.addListener(_onTmdbFocus);
   }
 
   @override
   void dispose() {
+    _tmdbFocus.removeListener(_onTmdbFocus);
+    _tmdbFocus.dispose();
     _tmdbCtrl.dispose();
     super.dispose();
+  }
+
+  void _onTmdbFocus() {
+    if (_tmdbFocus.hasFocus == _tmdbFocused) return;
+    setState(() => _tmdbFocused = _tmdbFocus.hasFocus);
+  }
+
+  Future<void> _clearCoverCache() async {
+    await ref.read(coverCacheProvider).clearMisses();
+    ref.read(coverCacheVersionProvider.notifier).state++;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('封面缓存已清除，已自动重新拉取'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -410,32 +630,61 @@ class _CoverSettingsPanelState extends ConsumerState<_CoverSettingsPanel> {
               .copyWith(color: AppColors.hintText),
         ),
         const SizedBox(height: AppSpacing.sm),
-        TextField(
-          controller: _tmdbCtrl,
-          obscureText: _obscure,
-          style: AppTypography.body,
-          decoration: InputDecoration(
-            hintText: '粘贴 TMDB v3 API Key（32 位）',
-            hintStyle: AppTypography.body
-                .copyWith(color: AppColors.hintText),
-            filled: true,
-            fillColor: AppColors.surface,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: BorderSide.none,
-            ),
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscure ? Icons.visibility_off : Icons.visibility,
-                color: AppColors.hintText,
-                size: 20,
-              ),
-              onPressed: () => setState(() => _obscure = !_obscure),
-            ),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: _tmdbFocused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
           ),
-          onChanged: (v) {
-            ref.read(appSettingsStorageProvider).tmdbApiKey = v;
-          },
+          child: TextField(
+            controller: _tmdbCtrl,
+            focusNode: _tmdbFocus,
+            obscureText: _obscure,
+            style: AppTypography.body,
+            decoration: InputDecoration(
+              hintText: '粘贴 TMDB v3 API Key（32 位）',
+              hintStyle: AppTypography.body
+                  .copyWith(color: AppColors.hintText),
+              filled: true,
+              fillColor: AppColors.surface,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(
+                  color: AppColors.netflixRed,
+                  width: 1.5,
+                ),
+              ),
+              suffixIcon: ExcludeFocus(
+                child: IconButton(
+                  icon: Icon(
+                    _obscure ? Icons.visibility_off : Icons.visibility,
+                    color: AppColors.hintText,
+                    size: 20,
+                  ),
+                  onPressed: () => setState(() => _obscure = !_obscure),
+                ),
+              ),
+            ),
+            onChanged: (v) {
+              ref.read(appSettingsStorageProvider).tmdbApiKey = v;
+            },
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
@@ -458,29 +707,88 @@ class _CoverSettingsPanelState extends ConsumerState<_CoverSettingsPanel> {
         const SizedBox(height: AppSpacing.md),
         Align(
           alignment: Alignment.centerLeft,
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('清除封面缓存并重试'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.primaryText,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md, vertical: 10),
-            ),
-            onPressed: () async {
-              await ref.read(coverCacheProvider).clearMisses();
-              ref.read(coverCacheVersionProvider.notifier).state++;
-              if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('封面缓存已清除，已自动重新拉取'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
+          child: _ActionButton(
+            icon: Icons.refresh,
+            label: '清除封面缓存并重试',
+            onActivate: _clearCoverCache,
           ),
         ),
       ],
+    );
+  }
+}
+
+/// TV 焦点感知的次级按钮（图标 + 文本）
+class _ActionButton extends StatelessWidget {
+  final IconData? icon;
+  final String label;
+  final VoidCallback? onActivate;
+  final Widget? leading;
+
+  const _ActionButton({
+    this.icon,
+    required this.label,
+    required this.onActivate,
+    this.leading,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'action-$label',
+      onActivate: onActivate,
+      builder: (context, focused) {
+        final disabled = onActivate == null;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (leading != null) ...[
+                leading!,
+                const SizedBox(width: AppSpacing.sm),
+              ] else if (icon != null) ...[
+                Icon(
+                  icon,
+                  size: 18,
+                  color: disabled
+                      ? AppColors.hintText
+                      : AppColors.primaryText,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              Text(
+                label,
+                style: AppTypography.body.copyWith(
+                  color: disabled
+                      ? AppColors.hintText
+                      : AppColors.primaryText,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -521,37 +829,6 @@ class _SettingsTile extends StatelessWidget {
           trailing,
         ],
       ),
-    );
-  }
-}
-
-class _SpeedSelector extends StatelessWidget {
-  final double value;
-  final ValueChanged<double> onChanged;
-
-  const _SpeedSelector({required this.value, required this.onChanged});
-
-  static const _speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-
-  @override
-  Widget build(BuildContext context) {
-    return DropdownButton<double>(
-      value: _speeds.contains(value) ? value : 1.0,
-      dropdownColor: AppColors.surface,
-      underline: const SizedBox.shrink(),
-      items: _speeds
-          .map((s) => DropdownMenuItem(
-                value: s,
-                child: Text('${s}x',
-                    style: AppTypography.body.copyWith(
-                        color: s == value
-                            ? AppColors.netflixRed
-                            : AppColors.primaryText)),
-              ))
-          .toList(),
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
     );
   }
 }
@@ -709,15 +986,9 @@ class _AboutPanelState extends State<_AboutPanel> {
           icon: Icons.cached,
           title: '缓存大小',
           subtitle: _loading ? '计算中...' : _formatSize(totalBytes),
-          trailing: ElevatedButton(
-            onPressed: _clearing || _loading ? null : _clearCache,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.primaryText,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 8),
-            ),
-            child: _clearing
+          trailing: _ActionButton(
+            label: _clearing ? '清除中...' : '清除缓存',
+            leading: _clearing
                 ? const SizedBox(
                     width: 16,
                     height: 16,
@@ -726,7 +997,12 @@ class _AboutPanelState extends State<_AboutPanel> {
                       color: AppColors.netflixRed,
                     ),
                   )
-                : const Text('清除缓存'),
+                : const Icon(
+                    Icons.delete_sweep_outlined,
+                    size: 18,
+                    color: AppColors.primaryText,
+                  ),
+            onActivate: _clearing || _loading ? null : _clearCache,
           ),
         ),
 

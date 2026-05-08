@@ -8,6 +8,7 @@ import '../../data/local/source_storage.dart';
 import '../../data/models/site.dart';
 import '../../data/models/source_config.dart';
 import '../../data/models/warehouse.dart';
+import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import 'providers/source_provider.dart';
 
@@ -22,47 +23,48 @@ class SourceManagePage extends ConsumerStatefulWidget {
 }
 
 class _SourceManagePageState extends ConsumerState<SourceManagePage> {
-  final _urlController = TextEditingController();
-  String? _error;
   bool _loading = false;
   String? _loadingUrl; // 正在加载的源 URL
   bool _builtInExpanded = true; // 内置片源是否展开（默认展开）
 
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
+  Future<void> _openAddSourceDialog() async {
+    final url = await showDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => const _AddSourceDialog(),
+    );
+    if (url == null || url.isEmpty) return;
+    await _addSource(url);
   }
 
-  Future<void> _addSource() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) return;
+  Future<void> _addSource(String url) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return;
 
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
 
     try {
       // 保存 URL
       final urls = ref.read(savedSourceUrlsProvider);
-      if (!urls.contains(url)) {
-        ref.read(savedSourceUrlsProvider.notifier).state = [...urls, url];
+      if (!urls.contains(trimmed)) {
+        ref.read(savedSourceUrlsProvider.notifier).state = [
+          ...urls,
+          trimmed,
+        ];
       }
 
       // 存储到 Hive
       final storage = ref.read(sourceStorageProvider);
-      await storage.add(url);
+      await storage.add(trimmed);
 
       // 选中并加载
-      ref.read(selectedSourceUrlProvider.notifier).state = url;
-      await storage.setSelected(url);
+      ref.read(selectedSourceUrlProvider.notifier).state = trimmed;
+      await storage.setSelected(trimmed);
 
       // JAR Bridge URL：直接加载
-      if (url.contains(':9978')) {
+      if (trimmed.contains(':9978')) {
         await ref.read(sourceConfigProvider.future);
         syncSitesToHome(ref);
-        _urlController.clear();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Bridge 源加载成功')),
@@ -77,18 +79,17 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
 
       if (warehouses.isNotEmpty) {
         // 多仓：提示用户选择仓库
-        _urlController.clear();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-                content: Text('多仓源已加载，共 ${warehouses.length} 个仓库，请选择')),
+                content:
+                    Text('多仓源已加载，共 ${warehouses.length} 个仓库，请选择')),
           );
         }
       } else {
         // 单仓：直接加载
         await ref.read(sourceConfigProvider.future);
         syncSitesToHome(ref);
-        _urlController.clear();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('配置源加载成功')),
@@ -96,9 +97,13 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
         }
       }
     } catch (e) {
-      setState(() => _error = '加载失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('加载失败: $e')),
+        );
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -203,56 +208,9 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     final thirdParty =
         savedUrls.where((u) => !SourceStorage.isBuiltIn(u)).toList();
 
-    final addInput = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('添加配置源', style: AppTypography.headline2),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          '支持苹果 CMS API、TVBox 单仓/多仓配置源 URL',
-          style: AppTypography.caption,
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _urlController,
-                decoration: InputDecoration(
-                  hintText: '输入 URL...',
-                  hintStyle:
-                      AppTypography.body.copyWith(color: AppColors.hintText),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  filled: true,
-                  fillColor: AppColors.cardBackground,
-                  isDense: true,
-                ),
-                style: AppTypography.body
-                    .copyWith(color: AppColors.primaryText),
-                onSubmitted: (_) => _addSource(),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            ElevatedButton(
-              onPressed: _loading ? null : _addSource,
-              child: _loading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('添加'),
-            ),
-          ],
-        ),
-        if (_error != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Text(_error!,
-              style: AppTypography.caption.copyWith(color: AppColors.error)),
-        ],
-      ],
+    final addInput = _AddSourceTrigger(
+      loading: _loading,
+      onActivate: _loading ? null : _openAddSourceDialog,
     );
 
     final body = Padding(
@@ -506,7 +464,7 @@ class _WarehouseChipState extends State<_WarehouseChip> {
 }
 
 /// 可聚焦的「内置片源」折叠行：标题 + 计数 + 展开箭头
-class _ExpandToggleRow extends StatefulWidget {
+class _ExpandToggleRow extends StatelessWidget {
   final bool expanded;
   final int count;
   final VoidCallback onToggle;
@@ -518,30 +476,12 @@ class _ExpandToggleRow extends StatefulWidget {
   });
 
   @override
-  State<_ExpandToggleRow> createState() => _ExpandToggleRowState();
-}
-
-class _ExpandToggleRowState extends State<_ExpandToggleRow> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onToggle();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onToggle,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
+    return TvFocusable(
+      debugLabel: 'expand-toggle-row',
+      onActivate: onToggle,
+      builder: (context, focused) {
+        return AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm,
@@ -550,7 +490,7 @@ class _ExpandToggleRowState extends State<_ExpandToggleRow> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(4),
             border: Border.all(
-              color: _focused ? AppColors.netflixRed : Colors.transparent,
+              color: focused ? AppColors.netflixRed : Colors.transparent,
               width: 1,
             ),
           ),
@@ -559,28 +499,31 @@ class _ExpandToggleRowState extends State<_ExpandToggleRow> {
             children: [
               Text('内置片源', style: AppTypography.headline2),
               const SizedBox(width: AppSpacing.xs),
-              _InfoChip('${widget.count} 个', AppColors.hintText),
+              _InfoChip('$count 个', AppColors.hintText),
               const SizedBox(width: AppSpacing.xs),
               Icon(
-                widget.expanded
+                expanded
                     ? Icons.keyboard_arrow_up
                     : Icons.keyboard_arrow_down,
-                color: _focused
-                    ? AppColors.netflixRed
-                    : AppColors.hintText,
+                color:
+                    focused ? AppColors.netflixRed : AppColors.hintText,
                 size: 20,
               ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
 
 // ── 源列表 Tile ──
 
-class _SourceTile extends StatefulWidget {
+/// 选中/焦点视觉分离：
+/// - selected → 红 ✓ + 红粗标题（无外边框）
+/// - focused  → 红边框 + 红光晕
+/// - 第三方源支持「长按 OK 删除」（≥500ms），短按/Enter 仍是切换选中
+class _SourceTile extends StatelessWidget {
   final String url;
   final bool isSelected;
   final bool isLoading;
@@ -598,155 +541,151 @@ class _SourceTile extends StatefulWidget {
   });
 
   @override
-  State<_SourceTile> createState() => _SourceTileState();
-}
-
-class _SourceTileState extends State<_SourceTile> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    final name = SourceStorage.nameOf(widget.url);
-    final desc = SourceStorage.descOf(widget.url);
+    final name = SourceStorage.nameOf(url);
+    final desc = SourceStorage.descOf(url);
 
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          color: widget.isSelected || _focused
-              ? AppColors.surface
-              : AppColors.cardBackground,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            // 焦点态 = 选中态 = 红边（都已是重点可操作状态），
-            // 焦点态额外用阴影和选中态区分
-            color: widget.isSelected || _focused
-                ? AppColors.netflixRed
-                : Colors.transparent,
-            width: 1,
+    return TvFocusable(
+      debugLabel: 'source-tile-$url',
+      onActivate: onTap,
+      onLongActivate: onDelete,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppColors.surface
+                : AppColors.cardBackground,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
           ),
-          boxShadow: _focused
-              ? [
-                  BoxShadow(
-                    color: AppColors.netflixRed.withAlpha(100),
-                    blurRadius: 12,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
-        ),
-        child: _SourceTileInner(
-          url: widget.url,
-          name: name,
-          desc: desc,
-          isSelected: widget.isSelected,
-          isLoading: widget.isLoading,
-          isMultiWarehouse: widget.isMultiWarehouse,
-          onTap: widget.onTap,
-          onDelete: widget.onDelete,
-        ),
-      ),
+          child: _SourceTileInner(
+            name: name,
+            desc: desc,
+            isSelected: isSelected,
+            isLoading: isLoading,
+            isMultiWarehouse: isMultiWarehouse,
+            focused: focused,
+            canDelete: onDelete != null,
+            onDelete: onDelete,
+          ),
+        );
+      },
     );
   }
 }
 
-/// 把原 ListTile 抽到独立组件，便于 _SourceTile 外包一层 Focus 后复用
+/// 仅渲染内容，不处理点击/焦点（外层 [TvFocusable] 已统一）
 class _SourceTileInner extends StatelessWidget {
-  final String url;
   final String name;
   final String? desc;
   final bool isSelected;
   final bool isLoading;
   final bool isMultiWarehouse;
-  final VoidCallback onTap;
+  final bool focused;
+  final bool canDelete;
   final VoidCallback? onDelete;
 
   const _SourceTileInner({
-    required this.url,
     required this.name,
     required this.desc,
     required this.isSelected,
     required this.isLoading,
     required this.isMultiWarehouse,
-    required this.onTap,
+    required this.focused,
+    required this.canDelete,
     required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
-        leading: isLoading
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.netflixRed,
-                ),
-              )
-            : Icon(
-                isSelected ? Icons.check_circle : Icons.circle_outlined,
-                color: isSelected ? AppColors.netflixRed : AppColors.hintText,
+      leading: isLoading
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.netflixRed,
               ),
-        title: Row(
-          children: [
-            Text(
-              name,
-              style: AppTypography.body.copyWith(
-                color: AppColors.primaryText,
-                fontWeight: FontWeight.w600,
+            )
+          : Icon(
+              isSelected ? Icons.check_circle : Icons.circle_outlined,
+              color: isSelected ? AppColors.netflixRed : AppColors.hintText,
+            ),
+      title: Row(
+        children: [
+          Text(
+            name,
+            style: AppTypography.body.copyWith(
+              color: isSelected
+                  ? AppColors.netflixRed
+                  : AppColors.primaryText,
+              fontWeight:
+                  isSelected ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
+          if (isMultiWarehouse) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.info.withAlpha(30),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '多仓',
+                style: AppTypography.caption.copyWith(
+                  color: AppColors.info,
+                  fontSize: 10,
+                ),
               ),
             ),
-            if (isMultiWarehouse) ...[
-              const SizedBox(width: AppSpacing.sm),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.info.withAlpha(30),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '多仓',
-                  style: AppTypography.caption.copyWith(
-                    color: AppColors.info,
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            ],
-            if (desc != null) ...[
-              const SizedBox(width: AppSpacing.sm),
-              Text(
-                desc!,
-                style: AppTypography.caption.copyWith(
-                  color: AppColors.secondaryText,
-                  fontSize: 12,
-                ),
-              ),
-            ],
           ],
-        ),
-        subtitle: null,
-        trailing: onDelete != null
-            ? IconButton(
+          if (desc != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              desc!,
+              style: AppTypography.caption.copyWith(
+                color: AppColors.secondaryText,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+      subtitle: canDelete && focused
+          ? Text(
+              '长按 OK 删除',
+              style: AppTypography.caption.copyWith(
+                color: AppColors.hintText,
+                fontSize: 11,
+              ),
+            )
+          : null,
+      // 鼠标用户保留删除图标；TV 用户走长按 OK，IconButton 不参与焦点流
+      trailing: canDelete
+          ? ExcludeFocus(
+              child: IconButton(
                 icon: const Icon(Icons.delete_outline,
                     color: AppColors.hintText),
                 onPressed: onDelete,
-              )
-            : null,
-        onTap: onTap,
+              ),
+            )
+          : null,
     );
   }
 }
@@ -947,6 +886,299 @@ class _InfoChip extends StatelessWidget {
         label,
         style: AppTypography.caption.copyWith(color: color),
       ),
+    );
+  }
+}
+
+// ── 添加配置源：列表中的触发按钮 + 弹窗 ──
+
+/// 列表中显示的「+ 添加配置源」按钮。OK 弹 [_AddSourceDialog]。
+/// TV 焦点流不再被 TextField 卡住。
+class _AddSourceTrigger extends StatelessWidget {
+  final bool loading;
+  final VoidCallback? onActivate;
+
+  const _AddSourceTrigger({required this.loading, required this.onActivate});
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'add-source-trigger',
+      onActivate: onActivate,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.cardBackground,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused
+                  ? AppColors.netflixRed
+                  : AppColors.divider,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            children: [
+              if (loading)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.netflixRed,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.add_circle_outline,
+                  size: 20,
+                  color:
+                      focused ? AppColors.netflixRed : AppColors.primaryText,
+                ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      loading ? '加载中...' : '添加配置源',
+                      style: AppTypography.body.copyWith(
+                        color: focused
+                            ? AppColors.netflixRed
+                            : AppColors.primaryText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '支持苹果 CMS API、TVBox 单仓/多仓配置源 URL',
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.hintText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: focused
+                    ? AppColors.netflixRed
+                    : AppColors.hintText,
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 添加配置源弹窗：含 TextField + 确定/取消，Esc/Back 关闭。
+/// 返回值：用户输入的 URL（已 trim），取消则为 null。
+class _AddSourceDialog extends StatefulWidget {
+  const _AddSourceDialog();
+
+  @override
+  State<_AddSourceDialog> createState() => _AddSourceDialogState();
+}
+
+class _AddSourceDialogState extends State<_AddSourceDialog> {
+  final _controller = TextEditingController();
+  final FocusNode _inputFocus = FocusNode(debugLabel: 'add-source-input');
+  bool _inputFocused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _inputFocus.addListener(_onInputFocus);
+  }
+
+  @override
+  void dispose() {
+    _inputFocus.removeListener(_onInputFocus);
+    _inputFocus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onInputFocus() {
+    if (_inputFocus.hasFocus == _inputFocused) return;
+    setState(() => _inputFocused = _inputFocus.hasFocus);
+  }
+
+  void _confirm() {
+    final url = _controller.text.trim();
+    if (url.isEmpty) return;
+    Navigator.of(context).pop(url);
+  }
+
+  void _cancel() {
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: AppColors.cardBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.escape): _cancel,
+          const SingleActivator(LogicalKeyboardKey.browserBack): _cancel,
+          const SingleActivator(LogicalKeyboardKey.gameButtonB): _cancel,
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('添加配置源', style: AppTypography.headline2),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                '支持苹果 CMS API、TVBox 单仓/多仓配置源 URL',
+                style: AppTypography.caption
+                    .copyWith(color: AppColors.hintText),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: _inputFocused
+                      ? [
+                          BoxShadow(
+                            color: AppColors.netflixRed.withAlpha(100),
+                            blurRadius: 12,
+                            spreadRadius: 1,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _inputFocus,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: '输入 URL...',
+                    hintStyle: AppTypography.body
+                        .copyWith(color: AppColors.hintText),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: AppColors.netflixRed,
+                        width: 1.5,
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    isDense: true,
+                  ),
+                  style: AppTypography.body
+                      .copyWith(color: AppColors.primaryText),
+                  onSubmitted: (_) => _confirm(),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  _DialogButton(
+                    label: '取消',
+                    onActivate: _cancel,
+                    primary: false,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  _DialogButton(
+                    label: '确定',
+                    onActivate: _confirm,
+                    primary: true,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onActivate;
+  final bool primary;
+
+  const _DialogButton({
+    required this.label,
+    required this.onActivate,
+    required this.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'dialog-btn-$label',
+      onActivate: onActivate,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+          decoration: BoxDecoration(
+            color: primary ? AppColors.netflixRed : AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused
+                  ? AppColors.primaryText
+                  : (primary
+                      ? AppColors.netflixRed
+                      : AppColors.divider),
+              width: focused ? 1.5 : 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(120),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: AppTypography.body.copyWith(
+              color: primary
+                  ? AppColors.primaryText
+                  : AppColors.primaryText,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        );
+      },
     );
   }
 }
