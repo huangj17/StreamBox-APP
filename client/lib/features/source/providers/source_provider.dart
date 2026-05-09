@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/local/source_storage.dart';
 import '../../../data/models/site.dart';
@@ -43,13 +44,40 @@ final warehouseListProvider = FutureProvider<List<Warehouse>>((ref) async {
 
 // ── 配置源解析 ──
 
+/// 本地 Bridge 自动覆盖：远程 Bridge URL 在本地 Bridge 起着时（500ms 内 /health
+/// 200）改用 `http://localhost:9978`。开发/调试无需手动改源 URL。
+///
+/// 不污染 storage（用户保存的远程 URL 保留），仅 runtime 切换。
+Future<String> _preferLocalBridge(String url, Dio dio) async {
+  if (!url.contains(':9978')) return url; // 非 Bridge
+  if (url.contains('localhost') || url.contains('127.0.0.1')) return url;
+  try {
+    final r = await dio.get<dynamic>(
+      'http://localhost:9978/health',
+      options: Options(
+        receiveTimeout: const Duration(milliseconds: 500),
+        sendTimeout: const Duration(milliseconds: 500),
+      ),
+    );
+    if (r.statusCode == 200) return 'http://localhost:9978';
+  } catch (_) {
+    // 本地没起，回退原远程
+  }
+  return url;
+}
+
 /// 当前选中配置源的解析结果
 /// 支持四种情况：JAR Bridge URL、直接 CMS API URL、单仓 JSON、多仓 JSON
 final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
-  final url = ref.watch(selectedSourceUrlProvider);
-  if (url == null || url.isEmpty) return null;
+  final raw = ref.watch(selectedSourceUrlProvider);
+  if (raw == null || raw.isEmpty) return null;
 
   final parser = ref.read(sourceParserProvider);
+
+  // 远程 Bridge → 优先用本地 Bridge（如果起着）
+  final url = SourceParser.isJarBridgeUrl(raw)
+      ? await _preferLocalBridge(raw, ref.read(dioProvider))
+      : raw;
 
   // JAR Bridge URL → 通过 /api/list 发现插件
   if (SourceParser.isJarBridgeUrl(url)) {

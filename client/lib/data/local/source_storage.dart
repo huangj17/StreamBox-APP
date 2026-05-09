@@ -8,12 +8,17 @@ class SourceStorage {
   static const builtInUrls = [
     // 自建 JAR Bridge 服务（放最前，方便用户识别）
     'http://1.14.171.39:9978',
-    'https://jyzyapi.com/api.php/provide/vod/',
-    'https://www.hongniuzy2.com/api.php/provide/vod/',
+    // 暴风：默认选中的 CMS 源（金鹰 jyzyapi 已挂，2026-05-09 移除）
     'https://bfzyapi.com/api.php/provide/vod/',
+    'https://www.hongniuzy2.com/api.php/provide/vod/',
     'https://www.tyyszy.com/api.php/provide/vod/',
     'https://collect.wolongzyw.com/api.php/provide/vod/',
     'https://api.apibdzy.com/api.php/provide/vod/',
+  ];
+
+  /// 已下架/失效的旧默认源 — 启动时从用户 Hive 里清理掉
+  static const _deprecatedUrls = [
+    'https://jyzyapi.com/api.php/provide/vod/', // 金鹰：服务挂了
   ];
 
   /// 预置第三方片源
@@ -27,18 +32,16 @@ class SourceStorage {
   static const defaultUrls = [...builtInUrls, ...thirdPartyUrls];
 
   /// 首次启动默认选中的源：跳过 Bridge（可能未启动）和第三方，挑第一个 CMS
-  static const defaultSelectedUrl = 'https://jyzyapi.com/api.php/provide/vod/';
+  static const defaultSelectedUrl = 'https://bfzyapi.com/api.php/provide/vod/';
 
   /// 已知片源的友好名称和描述
   static const sourceInfo = <String, ({String name, String desc})>{
     'http://1.14.171.39:9978':
         (name: 'JAR Bridge', desc: '自建服务 · JAR 插件源'),
-    'https://jyzyapi.com/api.php/provide/vod/':
-        (name: '金鹰资源', desc: '双线路 · HD · 10万+'),
-    'https://www.hongniuzy2.com/api.php/provide/vod/':
-        (name: '红牛资源', desc: '双线路 · 10万+'),
     'https://bfzyapi.com/api.php/provide/vod/':
         (name: '暴风资源', desc: 'HD · 13万+ · 多CDN'),
+    'https://www.hongniuzy2.com/api.php/provide/vod/':
+        (name: '红牛资源', desc: '双线路 · 10万+'),
     'https://www.tyyszy.com/api.php/provide/vod/':
         (name: '天一资源', desc: '多画质 · 75分类'),
     'https://collect.wolongzyw.com/api.php/provide/vod/':
@@ -133,6 +136,8 @@ class SourceStorage {
   /// 首次启动写入全部默认源并选中第一个；
   /// 非首次启动补充新增的默认源（不影响已有数据和选中状态）
   Future<void> initDefaultsIfEmpty() async {
+    await _purgeDeprecated();
+
     final existing = getAll();
     if (existing.isEmpty) {
       // 首次启动
@@ -147,6 +152,27 @@ class SourceStorage {
           await add(url);
         }
       }
+    }
+  }
+
+  /// 清理 [_deprecatedUrls] 列出的失效源，并纠正可能选中的失效源。
+  /// 同时清理引用失效源的 `_wh:` / `_bp:` 子键，避免 Hive 残留垃圾。
+  Future<void> _purgeDeprecated() async {
+    for (final url in _deprecatedUrls) {
+      await remove(url);
+      await _box.delete('_wh:$url');
+      await _box.delete('_bp:$url');
+    }
+    final selected = getSelected();
+    if (selected != null && _deprecatedUrls.contains(selected)) {
+      // 选中的源已失效 → 切到默认（如已存在则用默认；否则用首个内置 CMS）
+      final fallback = getAll().contains(defaultSelectedUrl)
+          ? defaultSelectedUrl
+          : (getAll().firstWhere(
+              (u) => isBuiltIn(u) && !u.contains(':9978'),
+              orElse: () => defaultSelectedUrl,
+            ));
+      await setSelected(fallback);
     }
   }
 }
