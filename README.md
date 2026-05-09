@@ -70,10 +70,24 @@ flutter run -d macos
 
 ### 优化项
 
-- [ ] **TV 遥控器交互** — 焦点流转、按键映射、长按行为打磨
-- [ ] **切源稳定性** — 消除偶发的"切源失败需多次点击"问题
+- [x] **TV 遥控器交互** — 焦点流转、按键映射、长按行为打磨
+  - 首页 `SideNavBar` 替代 TopNav，悬浮展开，左红条选中态 + 红环焦点态
+  - 详情页 / 搜索页 / 设置页 / 收藏 / 历史 全面接入 `TvFocusable` 红环+光晕规范
+  - 详情页：autofocus「播放」/「继续观看」、长按 OK 集数弹「从头播放 / 复制链接」、续播文案「继续 第 N 集 mm:ss」+「从头播放」次按钮、长简介展开模态
+  - 搜索页：autofocus 输入框、历史 chip 长按 OK 删除、错误文案收敛（不再 dump stack）
+  - 共享组件 `TvActionButton`（primary/secondary/red/text）+ `TvBackButton` 统一全站按钮焦点视觉
+- [x] **切源稳定性** — 消除偶发的"切源失败需多次点击"问题
+  - 历史/收藏/搜索/Banner Play 5 处 `firstWhere` 静默吞 `StateError` 导致「点不动」 → 统一走 `navigateToVideoDetail` helper：找不到源弹 SnackBar「『xxx』所在的片源已下架或未启用」+「去搜索」action 预填关键词跨源回查
+  - 历史 tile 失效项视觉降级：封面灰化 + 红字「片源已下架」
 - [ ] **大列表滚动性能** — 封面预取与图片缓存策略
-- [ ] **错误提示与重试** — 网络异常的引导更友好，避免空白页
+- [x] **错误提示与重试** — 网络异常的引导更友好，避免空白页
+  - 搜索 `_friendlyError`：500 → 「服务暂不可用」、SocketException/Timeout → 「网络不可达」、其它截 60 字
+  - 详情 `加载失败: 该片源暂不支持此视频`（500 分支）替代裸 stack
+  - 播放器 30 秒首帧 stuck timeout：libmpv 卡 buffering 不报错时自动弹「重试 / 切线路」遮罩，不再永远转圈
+  - 失效片源 SnackBar 反馈 + 跨源回查（见上）
+- [x] **首屏起播提速 & 稳定性** — DNS 预解析 + libmpv 调优
+  - 详情页进入时对最可能播放的 URL 做 DNS 预解析（`InternetAddress.lookup`），节省 50–200 ms 首帧时间。原 `dio.head` 预热被部分站点视为消耗单次 token 导致 libmpv 拿不到流，已停用
+  - libmpv：`bufferSize 64 MiB` / `cache-secs 30` / `demuxer-readahead-secs 20` / `cache-pause-initial no` / `network-timeout 10` / `vd-lavc-threads 4`
 
 ### 待开发功能
 
