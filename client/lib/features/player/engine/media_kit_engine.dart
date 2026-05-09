@@ -80,6 +80,8 @@ class MediaKitEngine implements VideoEngine {
       'cache-pause-initial': 'no',
       // media_kit 默认 5s，HLS master 握手慢时易误判
       'network-timeout': '10',
+      // 软解时多线程加速（默认 1）；hwdec=auto-safe 时影响小
+      'vd-lavc-threads': '4',
     };
     for (final e in props.entries) {
       try {

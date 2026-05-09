@@ -1,5 +1,5 @@
+import 'dart:io' show InternetAddress;
 import 'dart:ui';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -148,13 +148,17 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       }
     }
 
-    // 预热播放 URL 的 DNS/TCP/TLS，用户点击播放时 libmpv 直接复用
+    // 预热播放 URL 的 DNS，节省 libmpv 起播时的解析时间
     _warmPlaybackUrl();
   }
 
-  /// 对"用户最可能播放的那一集" 做一次 HEAD，预热连接。
+  /// 对"用户最可能播放的那一集"做 DNS 预解析，提前填充系统 DNS 缓存。
   ///
-  /// fire-and-forget：任何失败（405/超时/连不上）都静默，不影响详情页。
+  /// 旧实现用 `dio.head` — 部分站点签发的链接是单次有效 token，HEAD 会
+  /// 提前消耗 token 导致 libmpv GET 拿不到流。改成纯 DNS lookup：零副作用
+  /// （不发任何 HTTP 请求），节省 50–200ms 解析时间。
+  ///
+  /// fire-and-forget：失败（无网/host 无效/超时）均静默。
   Future<void> _warmPlaybackUrl() async {
     if (_warmed) return;
     _warmed = true;
@@ -166,17 +170,12 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       if (ei >= groups[gi].length) return;
       final url = groups[gi][ei].url;
       if (url.isEmpty || !url.startsWith('http')) return;
-      final dio = ref.read(dioProvider);
-      await dio.head<dynamic>(
-        url,
-        options: Options(
-          receiveTimeout: const Duration(seconds: 3),
-          sendTimeout: const Duration(seconds: 3),
-          followRedirects: true,
-        ),
-      );
+      final host = Uri.tryParse(url)?.host;
+      if (host == null || host.isEmpty) return;
+      await InternetAddress.lookup(host)
+          .timeout(const Duration(seconds: 2));
     } catch (_) {
-      // 预热失败（405/416/超时/SSL）均静默
+      // 预热失败（DNS 超时 / 无网）均静默
     }
   }
 

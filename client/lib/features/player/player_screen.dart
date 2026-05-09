@@ -111,6 +111,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // 播放失败信息（非空时显示错误遮罩）
   String? _error;
   Timer? _errorTimer; // 延迟显示错误，避免瞬态错误闪烁
+  Timer? _stuckTimer; // 卡死超时：30s 内未取到首帧/duration → 自动报错可重试
 
   // 加载 / 卡顿状态显示
   final _speedMonitor = NetworkSpeedMonitor();
@@ -165,6 +166,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     _posSub = _engine.positionStream.listen((p) {
       if (!_seeking && mounted) setState(() => _position = p);
+      // 位置推进 → 视频已开始播放，撤销卡死兜底
+      if (p > Duration.zero) _disarmStuckTimer();
     });
     _durSub = _engine.durationStream.listen((d) {
       if (mounted) {
@@ -176,6 +179,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             _errorTimer?.cancel();
           }
         });
+        // duration 拿到 → 元数据已下来，撤销卡死兜底
+        if (d.inMilliseconds > 0) _disarmStuckTimer();
         // 续播定位：首次 duration 确定后 seek 到历史位置
         if (_resumePositionMs > 0 && d.inMilliseconds > 0) {
           _engine.seek(Duration(milliseconds: _resumePositionMs));
@@ -208,6 +213,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           _errorTimer?.cancel();
         }
       });
+      // 进入 playing 态 → 视频已起播，撤销卡死兜底
+      if (p) _disarmStuckTimer();
     });
     _qualitiesSub = _engine.qualitiesStream.listen((list) {
       if (!mounted) return;
@@ -314,6 +321,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _hideTimer?.cancel();
     _seekHoldTimer?.cancel();
     _errorTimer?.cancel();
+    _stuckTimer?.cancel();
     _buffTickTimer?.cancel();
     _posSub?.cancel();
     _durSub?.cancel();
@@ -391,6 +399,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   // ── 播放控制 ──
 
+  /// 启动「30 秒无首帧」兜底计时器。引擎卡在 buffering 不报错时，
+  /// 由它兜底显示错误遮罩，让用户能切线路 / 重试。
+  void _armStuckTimer() {
+    _stuckTimer?.cancel();
+    _stuckTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+      if (_buffering &&
+          _position == Duration.zero &&
+          _duration == Duration.zero &&
+          _error == null) {
+        setState(() => _error = '加载超时（30 秒未取到首帧），请尝试切换线路');
+      }
+    });
+  }
+
+  void _disarmStuckTimer() {
+    _stuckTimer?.cancel();
+    _stuckTimer = null;
+  }
+
   void _playCurrentEpisode() {
     final url = _current.url;
     if (url.isEmpty) return;
@@ -405,6 +433,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _currentQuality = const VideoQuality.auto();
       _buffStartAt = DateTime.now();
     });
+    _armStuckTimer();
     _engine.open(url);
   }
 
