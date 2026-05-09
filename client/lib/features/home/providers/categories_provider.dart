@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/dio_client.dart';
 import '../../../data/models/site.dart';
@@ -68,6 +70,12 @@ final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
   return results.whereType<VideoItem>().take(5).toList();
 });
 
+/// 全局 rail fetch 并发闸：Bridge 后端 spider 单线程串行（每 plugin 一个
+/// `Executors.newSingleThreadExecutor`），首页同时 N 个 rail 起飞会让 spider
+/// 队列爆掉，排尾的命中 client 8s receiveTimeout fail。限到 4 并发后排队，
+/// 单 rail 看起来稍慢但成功率显著上升。
+final _railSemaphore = _AsyncSemaphore(4);
+
 /// 每个分类行的内容（family：会话级缓存，避免滚动时重复请求导致数据错乱）
 final categoryItemsProvider = FutureProvider.family<VideoListResult, String>(
   (ref, categoryId) async {
@@ -76,9 +84,38 @@ final categoryItemsProvider = FutureProvider.family<VideoListResult, String>(
     final category = categories.firstWhere((c) => c.id == categoryId);
     final site = sites.firstWhere((s) => s.key == category.siteKey);
     final repo = ref.read(homeRepositoryProvider);
-    return repo.getCategoryItems(site: site, categoryId: categoryId);
+    return _railSemaphore.run(
+      () => repo.getCategoryItems(site: site, categoryId: categoryId),
+    );
   },
 );
+
+/// 简单异步信号量。任务排队，先到先获 permit，释放后唤醒下一个等待者。
+class _AsyncSemaphore {
+  _AsyncSemaphore(this._permits);
+
+  int _permits;
+  final _waiters = <Completer<void>>[];
+
+  Future<T> run<T>(Future<T> Function() task) async {
+    if (_permits > 0) {
+      _permits--;
+    } else {
+      final c = Completer<void>();
+      _waiters.add(c);
+      await c.future;
+    }
+    try {
+      return await task();
+    } finally {
+      if (_waiters.isNotEmpty) {
+        _waiters.removeAt(0).complete();
+      } else {
+        _permits++;
+      }
+    }
+  }
+}
 
 /// 通过 main.dart 的 ProviderScope.overrides 注入已初始化实例
 final historyStorageProvider = Provider<HistoryStorage>(

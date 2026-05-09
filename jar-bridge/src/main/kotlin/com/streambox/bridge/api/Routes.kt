@@ -18,6 +18,11 @@ import java.util.concurrent.TimeUnit
 
 private val json = Json { prettyPrint = false }
 private val routeLogger = LoggerFactory.getLogger("Routes")
+
+/// 匹配 `"https://x.comhttps://y.com/...` 这种 spider 拼接两次 host 的脏 URL，
+/// 捕获第二个 scheme 起的部分。仅在 JSON 字符串值（前面有 `"`）的位置生效，
+/// 避免误伤含 https:// 的正文。
+private val doubleSchemeRegex = Regex("\"https?://[^\"\\s]*?(https?://[^\"\\s]+)")
 private val httpClient = OkHttpClient.Builder()
     .connectTimeout(10, TimeUnit.SECONDS)
     .readTimeout(10, TimeUnit.SECONDS)
@@ -58,6 +63,21 @@ fun Application.configureRoutes(manager: SpiderManager) {
             val ids = call.request.queryParameters["ids"]
             val wd = call.request.queryParameters["wd"]
 
+            // 缓存键：仅 ?ac=class（首页分类）和 ?ac=detail&t=X&pg=Y（分类页）走缓存。
+            // detail by ids / search 不缓存（用户级查询）。
+            val cacheKey: String? = when {
+                ac == "class" || (ac == null && t == null && ids == null && wd == null) ->
+                    "$key:class"
+                t != null -> "$key:t=$t:pg=$pg"
+                else -> null
+            }
+
+            // 命中缓存：跳过 spider 调用，直接进 respondResult 走 sanitize
+            cacheKey?.let { ResponseCache.get(it) }?.let { cached ->
+                call.respondResult(Result.success(cached))
+                return@get
+            }
+
             val result: Result<String> = when {
                 ac == "class" || (ac == null && t == null && ids == null && wd == null) ->
                     spider.homeContent(filter = true)
@@ -73,6 +93,14 @@ fun Application.configureRoutes(manager: SpiderManager) {
 
                 else ->
                     Result.failure(IllegalArgumentException("Bad request parameters"))
+            }
+
+            // 仅成功且非空时写缓存（验证由 respondResult 兜底；若是 invalid JSON
+            // 下次命中也会被 502，60s 后过期，acceptable）
+            if (cacheKey != null) {
+                result.onSuccess { jsonStr ->
+                    if (jsonStr.isNotBlank()) ResponseCache.put(cacheKey, jsonStr)
+                }
             }
 
             call.respondResult(result)
@@ -139,7 +167,10 @@ private suspend fun ApplicationCall.respondResult(result: Result<String>) {
                     // 把 Spider 返回的本地 proxy URL 替换为 Bridge 实际地址
                     val hostHeader = request.headers["Host"] ?: "localhost:${request.local.localPort}"
                     val bridgeBase = "http://$hostHeader"
-                    val fixed = jsonStr.replace("http://127.0.0.1:-1", bridgeBase)
+                    var fixed = jsonStr.replace("http://127.0.0.1:-1", bridgeBase)
+                    // 修复部分 spider 拼接 host 时重复出现两个 https://（如 ysj/doll）
+                    // 形如 "https://www.dmmiku.comhttps://img.dmmiku.com/..." → 取后段
+                    fixed = doubleSchemeRegex.replace(fixed, "\"$1")
                     respondText(fixed, ContentType.Application.Json)
                 } catch (_: Exception) {
                     respondError(502, "Invalid JSON response from plugin")

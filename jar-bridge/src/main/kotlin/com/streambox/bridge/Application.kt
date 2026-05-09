@@ -3,12 +3,14 @@ package com.streambox.bridge
 import com.streambox.bridge.api.configureRoutes
 import com.streambox.bridge.config.BridgeConfig
 import com.streambox.bridge.spider.SpiderManager
+import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.calllogging.*
 import io.ktor.server.plugins.swagger.*
 import io.ktor.server.request.*
+import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
@@ -50,6 +52,12 @@ fun Application.module(manager: SpiderManager? = null) {
     val mgr = manager ?: SpiderManager(BridgeConfig.load()).also { it.loadAll() }
     configureRoutes(mgr)
     routing {
+        // OpenAPI / Swagger UI 文档（/docs 与 /swagger 双 path 兼容）
+        swaggerUI(path = "docs", swaggerFile = "openapi.yaml")
         swaggerUI(path = "swagger", swaggerFile = "openapi.yaml")
+        // 访问根路径直接跳文档，避免裸 IP 看到 404
+        get("/") {
+            call.respondRedirect("/docs", permanent = false)
+        }
     }
 }
