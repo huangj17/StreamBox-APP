@@ -15,6 +15,8 @@ import '../../data/models/episode.dart';
 import '../../data/models/favorite_item.dart';
 import '../../widgets/letter_poster.dart';
 import '../../widgets/resolvable_cover.dart';
+import '../../widgets/tv_back_button.dart';
+import '../../widgets/tv_button.dart';
 import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import 'providers/detail_provider.dart';
@@ -52,7 +54,7 @@ class DetailScreen extends ConsumerWidget {
             const Positioned(
               top: 44,
               left: 8,
-              child: BackButton(color: Colors.white),
+              child: TvBackButton(),
             ),
             Center(
               child: Column(
@@ -64,10 +66,13 @@ class DetailScreen extends ConsumerWidget {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  ElevatedButton(
-                    onPressed: () => ref.invalidate(
+                  TvActionButton.secondary(
+                    icon: Icons.refresh,
+                    label: '重试',
+                    autofocus: true,
+                    debugLabel: 'detail-error-retry',
+                    onActivate: () => ref.invalidate(
                         videoDetailProvider((site: site, videoId: videoId))),
-                    child: const Text('重试'),
                   ),
                 ],
               ),
@@ -392,9 +397,9 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     right: AppSpacing.md,
                     bottom: isCompactPage ? AppSpacing.sm : AppSpacing.md,
                   ),
-                  child: Align(
+                  child: const Align(
                     alignment: Alignment.topLeft,
-                    child: _BackTvButton(onActivate: () => context.pop()),
+                    child: TvBackButton(),
                   ),
                 ),
               ),
@@ -434,12 +439,10 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
                   final actions = <Widget>[
                     if (hasPlay)
-                      _PrimaryActionButton(
+                      TvActionButton.primary(
                         icon: Icons.play_arrow,
                         label: playLabel,
                         compact: isCompact,
-                        background: Colors.white,
-                        foreground: Colors.black,
                         autofocus: true,
                         debugLabel: 'detail-play',
                         onActivate: () => _openPlayer(
@@ -452,13 +455,10 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                         ),
                       ),
                     if (hasResume)
-                      _PrimaryActionButton(
+                      TvActionButton.secondary(
                         icon: Icons.replay,
                         label: '从头播放',
                         compact: isCompact,
-                        background: const Color(0xB36D6D6E),
-                        foreground: AppColors.primaryText,
-                        autofocus: false,
                         debugLabel: 'detail-restart',
                         onActivate: () => _openPlayer(
                           context,
@@ -469,18 +469,23 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           positionMs: 0,
                         ),
                       ),
-                    _PrimaryActionButton(
-                      icon: _isFavorited ? Icons.check : Icons.add,
-                      label: _isFavorited ? '已收藏' : '收藏',
-                      compact: isCompact,
-                      background: _isFavorited
-                          ? AppColors.netflixRed.withAlpha(178)
-                          : const Color(0xB36D6D6E),
-                      foreground: AppColors.primaryText,
-                      autofocus: !hasPlay,
-                      debugLabel: 'detail-favorite',
-                      onActivate: _toggleFavorite,
-                    ),
+                    _isFavorited
+                        ? TvActionButton.red(
+                            icon: Icons.check,
+                            label: '已收藏',
+                            compact: isCompact,
+                            autofocus: !hasPlay,
+                            debugLabel: 'detail-favorite',
+                            onActivate: _toggleFavorite,
+                          )
+                        : TvActionButton.secondary(
+                            icon: Icons.add,
+                            label: '收藏',
+                            compact: isCompact,
+                            autofocus: !hasPlay,
+                            debugLabel: 'detail-favorite',
+                            onActivate: _toggleFavorite,
+                          ),
                   ];
 
                   final poster = ClipRRect(
@@ -729,129 +734,6 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
           ],
         ),
       ],
-    );
-  }
-}
-
-/// 详情页返回按钮（TV 焦点：红环+光晕）
-class _BackTvButton extends StatelessWidget {
-  final VoidCallback onActivate;
-
-  const _BackTvButton({required this.onActivate});
-
-  @override
-  Widget build(BuildContext context) {
-    return TvFocusable(
-      debugLabel: 'detail-back',
-      onActivate: onActivate,
-      ensureVisibleOnFocus: false,
-      builder: (context, focused) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: focused
-                ? AppColors.netflixRed.withAlpha(30)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: focused ? AppColors.netflixRed : Colors.transparent,
-              width: 1,
-            ),
-            boxShadow: focused
-                ? [
-                    BoxShadow(
-                      color: AppColors.netflixRed.withAlpha(100),
-                      blurRadius: 12,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: const Icon(
-            Icons.arrow_back,
-            color: AppColors.primaryText,
-            size: 20,
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// 详情页主操作按钮（播放 / 收藏）。
-/// TV 焦点：红环+光晕；选中态由调用方通过 [background] 表达。
-class _PrimaryActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool compact;
-  final Color background;
-  final Color foreground;
-  final bool autofocus;
-  final String? debugLabel;
-  final VoidCallback onActivate;
-
-  const _PrimaryActionButton({
-    required this.icon,
-    required this.label,
-    required this.compact,
-    required this.background,
-    required this.foreground,
-    required this.autofocus,
-    required this.onActivate,
-    this.debugLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final iconSize = compact ? 18.0 : 24.0;
-    final fontSize = compact ? 14.0 : 16.0;
-    final hPad = compact ? AppSpacing.md : AppSpacing.lg;
-    final vPad = compact ? 8.0 : 12.0;
-
-    return TvFocusable(
-      debugLabel: debugLabel,
-      autofocus: autofocus,
-      onActivate: onActivate,
-      builder: (context, focused) {
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: focused ? AppColors.netflixRed : Colors.transparent,
-              width: 1,
-            ),
-            boxShadow: focused
-                ? [
-                    BoxShadow(
-                      color: AppColors.netflixRed.withAlpha(100),
-                      blurRadius: 12,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: iconSize, color: foreground),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: foreground,
-                  fontSize: fontSize,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 }

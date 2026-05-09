@@ -6,6 +6,9 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../data/models/video_item.dart';
+import '../../widgets/tv_back_button.dart';
+import '../../widgets/tv_button.dart';
+import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import '../home/widgets/video_card.dart';
 import 'providers/search_provider.dart';
@@ -63,6 +66,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (context.canPop()) context.pop();
   }
 
+  /// TV 大屏不暴露原始 stack trace。常见错误用人类语言；其它截短到 60 字符。
+  String _friendlyError(Object e) {
+    final s = e.toString();
+    if (s.contains('500')) return '服务暂不可用';
+    if (s.contains('SocketException') || s.contains('TimeoutException')) {
+      return '网络不可达';
+    }
+    return s.length > 60 ? '${s.substring(0, 60)}…' : s;
+  }
+
   void _navigateToDetail(VideoItem video) {
     final sites = ref.read(sitesProvider);
     try {
@@ -87,7 +100,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         const SingleActivator(LogicalKeyboardKey.gameButtonB): _handleBack,
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('搜索')),
+        appBar: AppBar(
+          leadingWidth: 56,
+          leading: const Padding(
+            padding: EdgeInsets.only(left: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TvBackButton(),
+            ),
+          ),
+          title: const Text('搜索'),
+        ),
         body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -102,6 +125,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   child: TextField(
                     controller: _controller,
                     focusNode: _focusNode,
+                    autofocus: !_hasSearched,
                     decoration: InputDecoration(
                       hintText: '输入影片名称...',
                       hintStyle:
@@ -125,6 +149,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                         borderSide:
                             const BorderSide(color: AppColors.divider),
                       ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppColors.netflixRed,
+                          width: 2,
+                        ),
+                      ),
                       filled: true,
                       fillColor: AppColors.cardBackground,
                       isDense: true,
@@ -135,22 +166,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   ),
                 ),
                 const SizedBox(width: AppSpacing.md),
-                ElevatedButton(
-                  onPressed: _search,
-                  style: ButtonStyle(
-                    side: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.focused)) {
-                        return const BorderSide(
-                            color: AppColors.netflixRed, width: 2);
-                      }
-                      return null;
-                    }),
-                    elevation: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.focused) ? 8 : 2),
-                    shadowColor:
-                        WidgetStateProperty.all(AppColors.netflixRed),
-                  ),
-                  child: const Text('搜索'),
+                TvActionButton.primary(
+                  icon: Icons.search,
+                  label: '搜索',
+                  compact: true,
+                  debugLabel: 'search-submit',
+                  onActivate: _search,
                 ),
               ],
             ),
@@ -182,23 +203,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('搜索失败: $e', style: AppTypography.body),
+            Text(
+              '搜索失败: ${_friendlyError(e)}',
+              style: AppTypography.body,
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: AppSpacing.md),
-            ElevatedButton(
-              onPressed: _search,
-              style: ButtonStyle(
-                side: WidgetStateProperty.resolveWith((states) {
-                  if (states.contains(WidgetState.focused)) {
-                    return const BorderSide(
-                        color: AppColors.netflixRed, width: 2);
-                  }
-                  return null;
-                }),
-                elevation: WidgetStateProperty.resolveWith((states) =>
-                    states.contains(WidgetState.focused) ? 8 : 2),
-                shadowColor: WidgetStateProperty.all(AppColors.netflixRed),
-              ),
-              child: const Text('重试'),
+            TvActionButton.secondary(
+              icon: Icons.refresh,
+              label: '重试',
+              autofocus: true,
+              debugLabel: 'search-error-retry',
+              onActivate: _search,
             ),
           ],
         ),
@@ -214,22 +230,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   style: AppTypography.body,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                ElevatedButton(
-                  onPressed: _clearSearch,
-                  style: ButtonStyle(
-                    side: WidgetStateProperty.resolveWith((states) {
-                      if (states.contains(WidgetState.focused)) {
-                        return const BorderSide(
-                            color: AppColors.netflixRed, width: 2);
-                      }
-                      return null;
-                    }),
-                    elevation: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.focused) ? 8 : 2),
-                    shadowColor:
-                        WidgetStateProperty.all(AppColors.netflixRed),
-                  ),
-                  child: const Text('清空重搜'),
+                TvActionButton.secondary(
+                  icon: Icons.refresh,
+                  label: '清空重搜',
+                  autofocus: true,
+                  debugLabel: 'search-empty-clear',
+                  onActivate: _clearSearch,
                 ),
               ],
             ),
@@ -245,6 +251,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           items: items,
           hPad: hPad,
           autofocusFirst: autofocusFirst,
+          onTopRowUp: () => _focusNode.requestFocus(),
           onItemSelected: _navigateToDetail,
         );
       },
@@ -286,16 +293,14 @@ class _SearchHome extends ConsumerWidget {
                 children: [
                   Text('搜索历史', style: AppTypography.headline2),
                   const Spacer(),
-                  TextButton(
-                    onPressed: () {
+                  TvActionButton.text(
+                    icon: Icons.delete_outline,
+                    label: '清空',
+                    debugLabel: 'history-clear',
+                    onActivate: () {
                       ref.read(searchHistoryStorageProvider).clearAll();
                       ref.invalidate(searchHistoryProvider);
                     },
-                    child: Text(
-                      '清空',
-                      style: AppTypography.caption
-                          .copyWith(color: AppColors.hintText),
-                    ),
                   ),
                 ],
               ),
@@ -381,21 +386,12 @@ class _EmptyAction extends StatelessWidget {
             style: AppTypography.body.copyWith(color: AppColors.hintText),
           ),
           const SizedBox(width: AppSpacing.md),
-          ElevatedButton(
-            onPressed: onAction,
-            style: ButtonStyle(
-              side: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.focused)) {
-                  return const BorderSide(
-                      color: AppColors.netflixRed, width: 2);
-                }
-                return null;
-              }),
-              elevation: WidgetStateProperty.resolveWith((states) =>
-                  states.contains(WidgetState.focused) ? 8 : 2),
-              shadowColor: WidgetStateProperty.all(AppColors.netflixRed),
-            ),
-            child: Text(actionLabel),
+          TvActionButton.secondary(
+            icon: Icons.refresh,
+            label: actionLabel,
+            compact: true,
+            debugLabel: 'empty-action-$actionLabel',
+            onActivate: onAction,
           ),
         ],
       ),
@@ -404,8 +400,13 @@ class _EmptyAction extends StatelessWidget {
 }
 
 /// 搜索历史标签
-/// TV 交互：OK = 搜索；长按 OK / 菜单键 / Delete = 删除
-class _HistoryChip extends StatefulWidget {
+///
+/// TV 交互（统一走 [TvFocusable]）：
+/// - OK     = 搜索（[onTap]）
+/// - 长按 OK = 删除（[onDelete]）
+///
+/// 内嵌的 × icon 仅作视觉提示，不参与焦点流。
+class _HistoryChip extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final VoidCallback onDelete;
@@ -417,140 +418,56 @@ class _HistoryChip extends StatefulWidget {
   });
 
   @override
-  State<_HistoryChip> createState() => _HistoryChipState();
-}
-
-class _HistoryChipState extends State<_HistoryChip> {
-  static const _longPressMs = 500;
-
-  bool _focused = false;
-  bool _hovered = false;
-  DateTime? _selectDownAt;
-  bool _longPressFired = false;
-
-  bool get _highlighted => _focused || _hovered;
-
-  bool _isSelectKey(LogicalKeyboardKey k) =>
-      k == LogicalKeyboardKey.select ||
-      k == LogicalKeyboardKey.enter ||
-      k == LogicalKeyboardKey.numpadEnter ||
-      k == LogicalKeyboardKey.gameButtonA ||
-      k == LogicalKeyboardKey.space;
-
-  bool _isDeleteKey(LogicalKeyboardKey k) =>
-      k == LogicalKeyboardKey.delete ||
-      k == LogicalKeyboardKey.backspace ||
-      k == LogicalKeyboardKey.contextMenu;
-
-  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    if (_isDeleteKey(event.logicalKey) && event is KeyDownEvent) {
-      widget.onDelete();
-      return KeyEventResult.handled;
-    }
-    if (!_isSelectKey(event.logicalKey)) return KeyEventResult.ignored;
-
-    if (event is KeyDownEvent) {
-      _selectDownAt = DateTime.now();
-      _longPressFired = false;
-      return KeyEventResult.handled;
-    }
-    if (event is KeyRepeatEvent && !_longPressFired) {
-      if (_selectDownAt != null &&
-          DateTime.now().difference(_selectDownAt!).inMilliseconds >=
-              _longPressMs) {
-        _longPressFired = true;
-        widget.onDelete();
-      }
-      return KeyEventResult.handled;
-    }
-    if (event is KeyUpEvent) {
-      final downAt = _selectDownAt;
-      final fired = _longPressFired;
-      _selectDownAt = null;
-      _longPressFired = false;
-      if (fired) return KeyEventResult.handled;
-      // 兜底：部分平台不发 KeyRepeatEvent，按 KeyUp 间隔判长按
-      if (downAt != null &&
-          DateTime.now().difference(downAt).inMilliseconds >= _longPressMs) {
-        widget.onDelete();
-      } else {
-        widget.onTap();
-      }
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: _onKeyEvent,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
-        onExit: (_) => setState(() => _hovered = false),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
+    return TvFocusable(
+      debugLabel: 'history-chip-$label',
+      onActivate: onTap,
+      onLongActivate: onDelete,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: _focused
-                ? AppColors.netflixRed.withAlpha(60)
+            color: focused
+                ? AppColors.netflixRed.withAlpha(40)
                 : AppColors.cardBackground,
             borderRadius: BorderRadius.circular(16),
-            // 始终保留 2px border 占位，避免 focus 切换时 Wrap 重排抖动
             border: Border.all(
-              color: _focused ? AppColors.netflixRed : Colors.transparent,
-              width: 2,
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
             ),
-            boxShadow: _highlighted && !_focused
+            boxShadow: focused
                 ? [
                     BoxShadow(
-                      color: Colors.black.withAlpha(120),
-                      blurRadius: 8,
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 10,
                       spreadRadius: 1,
                     ),
                   ]
                 : null,
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: widget.onTap,
-              onLongPress: widget.onDelete,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 6),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.label,
-                      style: AppTypography.body.copyWith(
-                        color: AppColors.primaryText,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: widget.onDelete,
-                      behavior: HitTestBehavior.opaque,
-                      child: Icon(
-                        Icons.close,
-                        size: 14,
-                        color: _focused
-                            ? AppColors.primaryText
-                            : AppColors.hintText,
-                      ),
-                    ),
-                  ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: AppTypography.body.copyWith(
+                  color: AppColors.primaryText,
+                  fontSize: 13,
                 ),
               ),
-            ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.close,
+                size: 14,
+                color: focused
+                    ? AppColors.primaryText
+                    : AppColors.hintText,
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -604,6 +521,7 @@ class _ResultGrid extends StatelessWidget {
   final List<VideoItem> items;
   final double hPad;
   final bool autofocusFirst;
+  final VoidCallback? onTopRowUp;
   final void Function(VideoItem) onItemSelected;
 
   const _ResultGrid({
@@ -611,6 +529,7 @@ class _ResultGrid extends StatelessWidget {
     required this.hPad,
     required this.onItemSelected,
     this.autofocusFirst = false,
+    this.onTopRowUp,
   });
 
   @override
@@ -634,6 +553,7 @@ class _ResultGrid extends StatelessWidget {
         return VideoCard(
           video: video,
           autofocus: autofocusFirst && index == 0,
+          onUpEdge: index < crossAxisCount ? onTopRowUp : null,
           onSelected: () => onItemSelected(video),
           onFocused: () {},
         );
