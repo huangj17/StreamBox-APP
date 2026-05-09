@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -14,6 +15,7 @@ import '../../data/models/episode.dart';
 import '../../data/models/favorite_item.dart';
 import '../../widgets/letter_poster.dart';
 import '../../widgets/resolvable_cover.dart';
+import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import 'providers/detail_provider.dart';
 
@@ -201,6 +203,89 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     ref.invalidate(favoritesProvider);
   }
 
+  void _showEpisodeOptions(
+    BuildContext context, {
+    required Episode ep,
+    required List<List<Episode>> groups,
+    required List<String> sourceNames,
+    required int groupIndex,
+    required int episodeIndex,
+  }) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogCtx) {
+        return Dialog(
+          backgroundColor: AppColors.cardBackground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: Text(
+                      ep.name,
+                      style: AppTypography.headline2,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  _MenuRow(
+                    icon: Icons.replay,
+                    label: '从头播放',
+                    autofocus: true,
+                    debugLabel: 'episode-menu-restart',
+                    onActivate: () {
+                      Navigator.of(dialogCtx).pop();
+                      _openPlayer(
+                        context,
+                        groups: groups,
+                        sourceNames: sourceNames,
+                        groupIndex: groupIndex,
+                        episodeIndex: episodeIndex,
+                        positionMs: 0,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  _MenuRow(
+                    icon: Icons.link,
+                    label: '复制链接',
+                    debugLabel: 'episode-menu-copy',
+                    onActivate: () async {
+                      await Clipboard.setData(
+                          ClipboardData(text: ep.url));
+                      if (!dialogCtx.mounted) return;
+                      Navigator.of(dialogCtx).pop();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('链接已复制'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _openPlayer(
     BuildContext context, {
     required List<List<Episode>> groups,
@@ -309,11 +394,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                   ),
                   child: Align(
                     alignment: Alignment.topLeft,
-                    child: IconButton(
-                      icon: const Icon(Icons.arrow_back,
-                          color: AppColors.primaryText),
-                      onPressed: () => context.pop(),
-                    ),
+                    child: _BackTvButton(onActivate: () => context.pop()),
                   ),
                 ),
               ),
@@ -333,55 +414,72 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                       groups[0].isNotEmpty &&
                       groups[0][0].url.isNotEmpty;
 
-                  // 手机端按钮紧凑样式
-                  final compactBtnStyle = isCompact
-                      ? ElevatedButton.styleFrom(
-                          minimumSize: const Size(0, 36),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppSpacing.md,
-                          ),
-                          textStyle: const TextStyle(fontSize: 14),
-                        )
-                      : null;
+                  final resumeMs = _effectivePositionMs ?? 0;
+                  final hasResume = hasPlay && resumeMs > 0;
+                  final isSeries = groups.any((g) => g.length > 1);
+                  final resumeGi = hasPlay
+                      ? (_effectiveGroupIndex ?? 0)
+                          .clamp(0, groups.length - 1)
+                      : 0;
+                  final resumeEi = hasPlay
+                      ? (_effectiveEpisodeIndex ?? 0)
+                          .clamp(0, groups[resumeGi].length - 1)
+                      : 0;
+                  final playLabel = hasResume
+                      ? (isSeries
+                          ? '继续 ${groups[resumeGi][resumeEi].name} '
+                              '${_formatHms(resumeMs)}'
+                          : '继续观看 ${_formatHms(resumeMs)}')
+                      : '播放';
 
                   final actions = <Widget>[
                     if (hasPlay)
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          final gi = (_effectiveGroupIndex ?? 0)
-                              .clamp(0, groups.length - 1);
-                          final ep = (_effectiveEpisodeIndex ?? 0)
-                              .clamp(0, groups[gi].length - 1);
-                          _openPlayer(
-                            context,
-                            groups: groups,
-                            sourceNames: sourceNames,
-                            groupIndex: gi,
-                            episodeIndex: ep,
-                            positionMs: _effectivePositionMs ?? 0,
-                          );
-                        },
-                        icon: Icon(Icons.play_arrow, size: isCompact ? 18 : 24),
-                        label: const Text('播放'),
-                        style: compactBtnStyle,
-                      ),
-                    ElevatedButton.icon(
-                      onPressed: _toggleFavorite,
-                      icon: Icon(
-                        _isFavorited ? Icons.check : Icons.add,
-                        size: isCompact ? 18 : 24,
-                      ),
-                      label: Text(_isFavorited ? '已收藏' : '收藏'),
-                      style: (compactBtnStyle ?? const ButtonStyle()).copyWith(
-                        backgroundColor: WidgetStatePropertyAll(
-                          _isFavorited
-                              ? AppColors.netflixRed.withAlpha(178)
-                              : const Color(0xB36D6D6E),
-                        ),
-                        foregroundColor: const WidgetStatePropertyAll(
-                          AppColors.primaryText,
+                      _PrimaryActionButton(
+                        icon: Icons.play_arrow,
+                        label: playLabel,
+                        compact: isCompact,
+                        background: Colors.white,
+                        foreground: Colors.black,
+                        autofocus: true,
+                        debugLabel: 'detail-play',
+                        onActivate: () => _openPlayer(
+                          context,
+                          groups: groups,
+                          sourceNames: sourceNames,
+                          groupIndex: resumeGi,
+                          episodeIndex: resumeEi,
+                          positionMs: resumeMs,
                         ),
                       ),
+                    if (hasResume)
+                      _PrimaryActionButton(
+                        icon: Icons.replay,
+                        label: '从头播放',
+                        compact: isCompact,
+                        background: const Color(0xB36D6D6E),
+                        foreground: AppColors.primaryText,
+                        autofocus: false,
+                        debugLabel: 'detail-restart',
+                        onActivate: () => _openPlayer(
+                          context,
+                          groups: groups,
+                          sourceNames: sourceNames,
+                          groupIndex: resumeGi,
+                          episodeIndex: resumeEi,
+                          positionMs: 0,
+                        ),
+                      ),
+                    _PrimaryActionButton(
+                      icon: _isFavorited ? Icons.check : Icons.add,
+                      label: _isFavorited ? '已收藏' : '收藏',
+                      compact: isCompact,
+                      background: _isFavorited
+                          ? AppColors.netflixRed.withAlpha(178)
+                          : const Color(0xB36D6D6E),
+                      foreground: AppColors.primaryText,
+                      autofocus: !hasPlay,
+                      debugLabel: 'detail-favorite',
+                      onActivate: _toggleFavorite,
                     ),
                   ];
 
@@ -500,6 +598,13 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           if (intro != null) ...[
                             const SizedBox(height: AppSpacing.md),
                             intro,
+                            if (vod.vodContent.length > 80) ...[
+                              const SizedBox(height: AppSpacing.xs),
+                              _ExpandIntroButton(
+                                title: vod.vodName,
+                                content: vod.vodContent,
+                              ),
+                            ],
                           ],
                           const SizedBox(height: AppSpacing.lg),
                           Wrap(
@@ -533,6 +638,13 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                               if (intro != null) ...[
                                 const SizedBox(height: AppSpacing.md),
                                 intro,
+                                if (vod.vodContent.length > 80) ...[
+                                  const SizedBox(height: AppSpacing.xs),
+                                  _ExpandIntroButton(
+                                    title: vod.vodName,
+                                    content: vod.vodContent,
+                                  ),
+                                ],
                               ],
                               const SizedBox(height: AppSpacing.lg),
                               Wrap(
@@ -580,18 +692,32 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                         const SizedBox(width: AppSpacing.sm),
                     itemBuilder: (context, j) {
                       final ep = groups[i][j];
-                      return ActionChip(
-                        label: Text(ep.name),
-                        backgroundColor: AppColors.surface,
-                        onPressed: ep.url.isEmpty
-                            ? null
-                            : () => _openPlayer(
-                                  context,
-                                  groups: groups,
-                                  sourceNames: sourceNames,
-                                  groupIndex: i,
-                                  episodeIndex: j,
-                                ),
+                      final disabled = ep.url.isEmpty;
+                      return Center(
+                        child: _EpisodeChip(
+                          label: ep.name,
+                          disabled: disabled,
+                          debugLabel: 'episode-$i-$j',
+                          onActivate: disabled
+                              ? null
+                              : () => _openPlayer(
+                                    context,
+                                    groups: groups,
+                                    sourceNames: sourceNames,
+                                    groupIndex: i,
+                                    episodeIndex: j,
+                                  ),
+                          onLongActivate: disabled
+                              ? null
+                              : () => _showEpisodeOptions(
+                                    context,
+                                    ep: ep,
+                                    groups: groups,
+                                    sourceNames: sourceNames,
+                                    groupIndex: i,
+                                    episodeIndex: j,
+                                  ),
+                        ),
                       );
                     },
                   ),
@@ -607,11 +733,380 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   }
 }
 
+/// 详情页返回按钮（TV 焦点：红环+光晕）
+class _BackTvButton extends StatelessWidget {
+  final VoidCallback onActivate;
+
+  const _BackTvButton({required this.onActivate});
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'detail-back',
+      onActivate: onActivate,
+      ensureVisibleOnFocus: false,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: focused
+                ? AppColors.netflixRed.withAlpha(30)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: const Icon(
+            Icons.arrow_back,
+            color: AppColors.primaryText,
+            size: 20,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 详情页主操作按钮（播放 / 收藏）。
+/// TV 焦点：红环+光晕；选中态由调用方通过 [background] 表达。
+class _PrimaryActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool compact;
+  final Color background;
+  final Color foreground;
+  final bool autofocus;
+  final String? debugLabel;
+  final VoidCallback onActivate;
+
+  const _PrimaryActionButton({
+    required this.icon,
+    required this.label,
+    required this.compact,
+    required this.background,
+    required this.foreground,
+    required this.autofocus,
+    required this.onActivate,
+    this.debugLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconSize = compact ? 18.0 : 24.0;
+    final fontSize = compact ? 14.0 : 16.0;
+    final hPad = compact ? AppSpacing.md : AppSpacing.lg;
+    final vPad = compact ? 8.0 : 12.0;
+
+    return TvFocusable(
+      debugLabel: debugLabel,
+      autofocus: autofocus,
+      onActivate: onActivate,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: iconSize, color: foreground),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: foreground,
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 详情页弹窗中的菜单行（TV 焦点：红环+光晕；选中态由调用方表达）
+class _MenuRow extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool autofocus;
+  final String? debugLabel;
+  final VoidCallback onActivate;
+
+  const _MenuRow({
+    required this.icon,
+    required this.label,
+    required this.onActivate,
+    this.autofocus = false,
+    this.debugLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: debugLabel,
+      autofocus: autofocus,
+      onActivate: onActivate,
+      ensureVisibleOnFocus: false,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 12,
+          ),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 12,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: AppColors.primaryText),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTypography.body
+                      .copyWith(color: AppColors.primaryText),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 详情页"展开简介"按钮（TV 焦点：红环+光晕）
+class _ExpandIntroButton extends StatelessWidget {
+  final String title;
+  final String content;
+
+  const _ExpandIntroButton({required this.title, required this.content});
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TvFocusable(
+        debugLabel: 'detail-expand-intro',
+        ensureVisibleOnFocus: false,
+        onActivate: () => _showIntroDialog(context),
+        builder: (context, focused) {
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: 4,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: focused ? AppColors.netflixRed : Colors.transparent,
+                width: 1,
+              ),
+              boxShadow: focused
+                  ? [
+                      BoxShadow(
+                        color: AppColors.netflixRed.withAlpha(100),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '展开',
+                  style: AppTypography.caption.copyWith(
+                    color: focused
+                        ? AppColors.netflixRed
+                        : AppColors.secondaryText,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 16,
+                  color: focused
+                      ? AppColors.netflixRed
+                      : AppColors.secondaryText,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showIntroDialog(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (dialogCtx) {
+        return Dialog(
+          backgroundColor: AppColors.cardBackground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: AppTypography.headline2),
+                  const SizedBox(height: AppSpacing.md),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Text(content, style: AppTypography.body),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: _MenuRow(
+                      icon: Icons.close,
+                      label: '关闭',
+                      autofocus: true,
+                      debugLabel: 'intro-dialog-close',
+                      onActivate: () => Navigator.of(dialogCtx).pop(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 详情页集数 chip（TV 焦点：红环+光晕，圆角 19）
+class _EpisodeChip extends StatelessWidget {
+  final String label;
+  final bool disabled;
+  final String? debugLabel;
+  final VoidCallback? onActivate;
+  final VoidCallback? onLongActivate;
+
+  const _EpisodeChip({
+    required this.label,
+    required this.disabled,
+    required this.onActivate,
+    this.onLongActivate,
+    this.debugLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: debugLabel,
+      onActivate: onActivate,
+      onLongActivate: onLongActivate,
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : AppColors.divider,
+              width: 1,
+            ),
+            boxShadow: focused
+                ? [
+                    BoxShadow(
+                      color: AppColors.netflixRed.withAlpha(100),
+                      blurRadius: 10,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: AppTypography.caption.copyWith(
+              color:
+                  disabled ? AppColors.hintText : AppColors.primaryText,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 评分是否有效（非空、非 0、非 0.0）
 bool _hasScore(String? score) {
   if (score == null || score.isEmpty) return false;
   final v = double.tryParse(score);
   return v != null && v > 0;
+}
+
+/// 毫秒 → "h:mm:ss" 或 "m:ss"
+String _formatHms(int ms) {
+  final s = ms ~/ 1000;
+  final h = s ~/ 3600;
+  final m = (s % 3600) ~/ 60;
+  final sec = s % 60;
+  String two(int n) => n.toString().padLeft(2, '0');
+  if (h > 0) return '$h:${two(m)}:${two(sec)}';
+  return '$m:${two(sec)}';
 }
 
 /// 元数据标签
