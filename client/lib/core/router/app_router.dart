@@ -79,10 +79,15 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/search',
-      pageBuilder: (context, state) => _buildPage(
-        const SearchScreen(),
-        state,
-      ),
+      pageBuilder: (context, state) {
+        final extra = state.extra as Map<String, dynamic>?;
+        return _buildPage(
+          SearchScreen(
+            initialKeyword: extra?['keyword'] as String?,
+          ),
+          state,
+        );
+      },
     ),
     GoRoute(
       path: '/source',

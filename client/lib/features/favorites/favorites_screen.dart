@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/util/site_navigation.dart';
 import '../../data/models/video_item.dart';
 import '../home/providers/categories_provider.dart';
 import '../home/widgets/video_card.dart';
@@ -72,14 +72,13 @@ class FavoritesScreen extends ConsumerWidget {
 
   void _navigateToDetail(
       BuildContext context, WidgetRef ref, VideoItem video) {
-    final sites = ref.read(sitesProvider);
-    try {
-      final site = sites.firstWhere((s) => s.key == video.siteKey);
-      context.push('/detail', extra: {
-        'site': site,
-        'videoId': video.id,
-      });
-    } catch (_) {}
+    navigateToVideoDetail(
+      context,
+      ref,
+      siteKey: video.siteKey,
+      videoId: video.id,
+      title: video.title,
+    );
   }
 
   void _confirmClearAll(BuildContext context, WidgetRef ref) {

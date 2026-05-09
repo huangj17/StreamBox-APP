@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/util/site_navigation.dart';
 import '../../data/models/site.dart';
 import '../../data/models/category.dart';
 import '../../data/models/video_item.dart';
@@ -116,26 +117,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   void _navigateToDetail(VideoItem video) {
-    final sites = ref.read(sitesProvider);
-    final site = sites.firstWhere((s) => s.key == video.siteKey);
-    context.push('/detail', extra: {
-      'site': site,
-      'videoId': video.id,
-      // 「继续观看」行点击时携带历史线路、集数和进度，用于续播定位
-      if (video.historyGroupIndex != null)
-        'initialGroupIndex': video.historyGroupIndex,
-      if (video.historyEpisodeIndex != null)
-        'initialEpisodeIndex': video.historyEpisodeIndex,
-      if (video.historyPositionMs != null)
-        'initialPositionMs': video.historyPositionMs,
-    });
+    navigateToVideoDetail(
+      context,
+      ref,
+      siteKey: video.siteKey,
+      videoId: video.id,
+      title: video.title,
+      initialGroupIndex: video.historyGroupIndex,
+      initialEpisodeIndex: video.historyEpisodeIndex,
+      initialPositionMs: video.historyPositionMs,
+    );
   }
 
   /// Banner「播放」按钮：fetch 详情拿到第一集 → 直接进播放器
   /// 找不到可播剧集时降级到详情页
   Future<void> _playFromBanner(VideoItem video) async {
     final sites = ref.read(sitesProvider);
-    final site = sites.firstWhere((s) => s.key == video.siteKey);
+    final matched = sites.where((s) => s.key == video.siteKey).toList();
+    if (matched.isEmpty) {
+      // 源已下架 → 走通用反馈路径（SnackBar + 去搜索）
+      _navigateToDetail(video);
+      return;
+    }
+    final site = matched.first;
 
     try {
       final detail = await ref.read(

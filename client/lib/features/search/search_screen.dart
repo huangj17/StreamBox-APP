@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/util/site_navigation.dart';
 import '../../data/models/video_item.dart';
 import '../../widgets/tv_back_button.dart';
 import '../../widgets/tv_button.dart';
@@ -15,7 +16,11 @@ import 'providers/search_provider.dart';
 
 /// 搜索页
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  /// 进页时预填的关键词（来自「片源已下架」SnackBar 的「去搜索」action）。
+  /// 非空时进页自动触发搜索。
+  final String? initialKeyword;
+
+  const SearchScreen({super.key, this.initialKeyword});
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -26,6 +31,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _focusNode = FocusNode();
   bool _hasSearched = false;
   bool _autofocusFirstResult = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final kw = widget.initialKeyword?.trim();
+    if (kw != null && kw.isNotEmpty) {
+      _controller.text = kw;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search(kw);
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -77,14 +94,13 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _navigateToDetail(VideoItem video) {
-    final sites = ref.read(sitesProvider);
-    try {
-      final site = sites.firstWhere((s) => s.key == video.siteKey);
-      context.push('/detail', extra: {
-        'site': site,
-        'videoId': video.id,
-      });
-    } catch (_) {}
+    navigateToVideoDetail(
+      context,
+      ref,
+      siteKey: video.siteKey,
+      videoId: video.id,
+      title: video.title,
+    );
   }
 
   @override

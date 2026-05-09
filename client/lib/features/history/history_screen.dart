@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/util/site_navigation.dart';
 import '../../data/models/watch_history.dart';
-import '../../data/models/video_item.dart';
 import '../../widgets/resolvable_cover.dart';
 import '../home/providers/categories_provider.dart';
 
@@ -32,21 +31,17 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     setState(() => _histories = storage.getAllUnfiltered());
   }
 
-  void _navigateToDetail(VideoItem video) {
-    final sites = ref.read(sitesProvider);
-    try {
-      final site = sites.firstWhere((s) => s.key == video.siteKey);
-      context.push('/detail', extra: {
-        'site': site,
-        'videoId': video.id,
-        if (video.historyGroupIndex != null)
-          'initialGroupIndex': video.historyGroupIndex,
-        if (video.historyEpisodeIndex != null)
-          'initialEpisodeIndex': video.historyEpisodeIndex,
-        if (video.historyPositionMs != null)
-          'initialPositionMs': video.historyPositionMs,
-      });
-    } catch (_) {}
+  void _openHistory(WatchHistory h) {
+    navigateToVideoDetail(
+      context,
+      ref,
+      siteKey: h.siteKey,
+      videoId: h.videoId,
+      title: h.title,
+      initialGroupIndex: h.groupIndex,
+      initialEpisodeIndex: h.episodeIndex,
+      initialPositionMs: h.positionMs,
+    );
   }
 
   void _deleteItem(WatchHistory h) async {
@@ -102,9 +97,11 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
             itemCount: _histories.length,
             itemBuilder: (context, index) {
               final h = _histories[index];
+              final stale = !isSiteActive(ref, h.siteKey);
               return _HistoryTile(
                 history: h,
-                onTap: () => _navigateToDetail(VideoItem.fromHistory(h)),
+                stale: stale,
+                onTap: () => _openHistory(h),
                 onDelete: () => _deleteItem(h),
               );
             },
@@ -154,6 +151,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
 
 class _HistoryTile extends StatelessWidget {
   final WatchHistory history;
+  final bool stale;
   final VoidCallback onTap;
   final VoidCallback onDelete;
 
@@ -161,6 +159,7 @@ class _HistoryTile extends StatelessWidget {
     required this.history,
     required this.onTap,
     required this.onDelete,
+    this.stale = false,
   });
 
   @override
@@ -185,16 +184,19 @@ class _HistoryTile extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: SizedBox(
-                      width: 160,
-                      height: 90,
-                      child: ResolvableCover(
-                        directUrl: history.cover,
-                        title: history.title,
-                        seed: '${history.siteKey}:${history.videoId}',
-                        fit: BoxFit.cover,
-                        memCacheWidth: 320,
-                        letterScale: 0.5,
+                    child: Opacity(
+                      opacity: stale ? 0.4 : 1.0,
+                      child: SizedBox(
+                        width: 160,
+                        height: 90,
+                        child: ResolvableCover(
+                          directUrl: history.cover,
+                          title: history.title,
+                          seed: '${history.siteKey}:${history.videoId}',
+                          fit: BoxFit.cover,
+                          memCacheWidth: 320,
+                          letterScale: 0.5,
+                        ),
                       ),
                     ),
                   ),
@@ -231,7 +233,11 @@ class _HistoryTile extends StatelessWidget {
                 children: [
                   Text(
                     history.title,
-                    style: AppTypography.title,
+                    style: AppTypography.title.copyWith(
+                      color: stale
+                          ? AppColors.secondaryText
+                          : AppColors.primaryText,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -243,9 +249,10 @@ class _HistoryTile extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    progressText,
-                    style: AppTypography.caption
-                        .copyWith(color: AppColors.hintText),
+                    stale ? '片源已下架' : progressText,
+                    style: AppTypography.caption.copyWith(
+                      color: stale ? AppColors.error : AppColors.hintText,
+                    ),
                   ),
                 ],
               ),
