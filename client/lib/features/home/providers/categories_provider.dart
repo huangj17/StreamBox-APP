@@ -45,10 +45,10 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
   return repo.getCategories(sites, categoryWeights: weights);
 });
 
-/// Banner 数据：从前若干个动态分类各取首条，凑够 5 条，保证内容多样性。
+/// Banner 数据：从第一个动态分类里随机挑 5 条。
 ///
-/// 复用 [categoryItemsProvider] family —— 与首屏前几行 rail 共享同一份请求，
-/// 不产生冗余网络流量；同时把这些分类的首页数据并发预热，rail 渲染时直接命中缓存。
+/// 复用 [categoryItemsProvider] family —— 与首行 rail 共享同一份请求，
+/// 只等 1 个 rail，banner 跟首行几乎同时出现，避免等齐多个分类的尾延迟。
 /// 完全自包含，绝不抛异常。
 final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
   final categories = await ref.watch(categoriesProvider.future);
@@ -56,18 +56,16 @@ final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
       categories.where((c) => c.type == CategoryType.dynamic).toList();
   if (dynamicCats.isEmpty) return [];
 
-  // 取前 8 个候选分类并发拉，最终保留前 5 条非空首条
-  final picks = dynamicCats.take(8).toList();
-  final results = await Future.wait(
-    picks.map(
-      (cat) => ref
-          .read(categoryItemsProvider(cat.id).future)
-          .then<VideoItem?>((r) => r.items.isNotEmpty ? r.items.first : null)
-          .catchError((_) => null),
-    ),
-  );
-
-  return results.whereType<VideoItem>().take(5).toList();
+  try {
+    final first = dynamicCats.first;
+    final result = await ref.read(categoryItemsProvider(first.id).future);
+    final items = List<VideoItem>.from(result.items);
+    if (items.isEmpty) return [];
+    items.shuffle();
+    return items.take(5).toList();
+  } catch (_) {
+    return [];
+  }
 });
 
 /// 全局 rail fetch 并发闸：Bridge 后端 spider 单线程串行（每 plugin 一个
