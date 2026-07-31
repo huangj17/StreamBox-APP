@@ -110,12 +110,15 @@ final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
 /// 当前可用的站点列表（CMS 站点 + Bridge 站点）
 final availableSitesProvider = Provider<List<Site>>((ref) {
   final configAsync = ref.watch(sourceConfigProvider);
-  return configAsync.whenOrNull(data: (config) {
-        if (config == null) return <Site>[];
-        final bridgeSites = config.sites.where((s) => s.isBridge).toList();
-        if (bridgeSites.isNotEmpty) return bridgeSites;
-        return config.cmsSites;
-      }) ??
+  return configAsync.whenOrNull(
+        data: (config) {
+          if (config == null) return <Site>[];
+          final cmsSites = config.cmsSites.toSet();
+          return config.sites
+              .where((site) => site.isBridge || cmsSites.contains(site))
+              .toList();
+        },
+      ) ??
       [];
 });
 

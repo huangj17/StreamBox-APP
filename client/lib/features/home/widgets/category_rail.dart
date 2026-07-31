@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
@@ -24,6 +25,7 @@ class CategoryRail extends StatefulWidget {
   final VoidCallback? onViewMore;
   final bool showProgress;
   final List<WatchHistory> histories;
+
   /// 首条 rail（紧邻 Banner）：内部卡片 ↑ 兜底 Banner Play。其它 rail 走默认
   /// 几何上行，让 Flutter 按几何挑上一行同列卡片。
   final bool isFirstRail;
@@ -64,8 +66,7 @@ class _CategoryRailState extends State<CategoryRail> {
     super.didUpdateWidget(oldWidget);
     final needs = widget.onViewMore != null;
     if (needs && _viewMoreFocus == null) {
-      _viewMoreFocus =
-          FocusNode(debugLabel: 'view-more-${widget.category.id}');
+      _viewMoreFocus = FocusNode(debugLabel: 'view-more-${widget.category.id}');
     } else if (!needs && _viewMoreFocus != null) {
       _viewMoreFocus!.dispose();
       _viewMoreFocus = null;
@@ -92,7 +93,9 @@ class _CategoryRailState extends State<CategoryRail> {
       skipTraversal: true,
       onFocusChange: (hasFocus) => setState(() => _rowFocused = hasFocus),
       child: Padding(
-        padding: EdgeInsets.only(bottom: isMobile ? AppSpacing.md : AppSpacing.lg),
+        padding: EdgeInsets.only(
+          bottom: isMobile ? AppSpacing.md : AppSpacing.lg,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -111,7 +114,7 @@ class _CategoryRailState extends State<CategoryRail> {
                     curve: Curves.easeOut,
                     transform: _rowFocused
                         ? (Matrix4.diagonal3Values(1.05, 1.05, 1.0)
-                          ..setTranslationRaw(-4.0, 0, 0))
+                            ..setTranslationRaw(-4.0, 0, 0))
                         : Matrix4.identity(),
                     transformAlignment: Alignment.centerLeft,
                     child: Text(
@@ -132,16 +135,15 @@ class _CategoryRailState extends State<CategoryRail> {
             ),
             // 内容区
             SizedBox(
-              height: (widget.showProgress
+              height:
+                  (widget.showProgress
                       ? (isMobile ? 100.0 : AppSpacing.cardHeightLandscape)
                       : (isMobile ? 180.0 : AppSpacing.cardHeight)) +
                   (isMobile ? 30 : 40),
               child: widget.items.when(
                 loading: () => _buildSkeletonList(),
-                error: (e, _) => ErrorRail(
-                  message: '加载失败，按 OK 重试',
-                  onRetry: widget.onRetry,
-                ),
+                error: (e, _) =>
+                    ErrorRail(message: '加载失败，按 OK 重试', onRetry: widget.onRetry),
                 data: (list) {
                   if (list.isEmpty) return const SizedBox.shrink();
                   return _buildCardList(list);
@@ -168,11 +170,9 @@ class _CategoryRailState extends State<CategoryRail> {
       scrollDirection: Axis.horizontal,
       padding: EdgeInsets.symmetric(horizontal: hPadding),
       itemCount: 6,
-      separatorBuilder: (_, _) => SizedBox(width: isMobile ? AppSpacing.sm : AppSpacing.md),
-      itemBuilder: (_, _) => SkeletonCard(
-        width: cardW,
-        height: cardH,
-      ),
+      separatorBuilder: (_, _) =>
+          SizedBox(width: isMobile ? AppSpacing.sm : AppSpacing.md),
+      itemBuilder: (_, _) => SkeletonCard(width: cardW, height: cardH),
     );
   }
 
@@ -183,19 +183,19 @@ class _CategoryRailState extends State<CategoryRail> {
     return ListView.separated(
       scrollDirection: Axis.horizontal,
       clipBehavior: Clip.none,
-      cacheExtent: 300,
+      scrollCacheExtent: const ScrollCacheExtent.pixels(300),
       padding: EdgeInsets.symmetric(
         horizontal: edgePadding,
         vertical: isMobile ? 10 : 20,
       ),
       itemCount: items.length,
-      separatorBuilder: (_, _) => SizedBox(width: isMobile ? AppSpacing.sm : AppSpacing.md),
+      separatorBuilder: (_, _) =>
+          SizedBox(width: isMobile ? AppSpacing.sm : AppSpacing.md),
       itemBuilder: (context, index) {
         final video = items[index];
         // 查找对应的历史记录
         final history = widget.histories
-            .where(
-                (h) => h.videoId == video.id && h.siteKey == video.siteKey)
+            .where((h) => h.videoId == video.id && h.siteKey == video.siteKey)
             .firstOrNull;
 
         return VideoCard(
@@ -293,9 +293,7 @@ class _ViewMoreButtonState extends State<_ViewMoreButton> {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(4),
-              color: _highlighted
-                  ? AppColors.surface
-                  : Colors.transparent,
+              color: _highlighted ? AppColors.surface : Colors.transparent,
               border: _focused
                   ? Border.all(color: AppColors.netflixRed, width: 1)
                   : null,
@@ -312,11 +310,13 @@ class _ViewMoreButtonState extends State<_ViewMoreButton> {
                   ),
                 ),
                 const SizedBox(width: 2),
-                Icon(Icons.chevron_right,
-                    size: 16,
-                    color: _highlighted
-                        ? AppColors.primaryText
-                        : AppColors.secondaryText),
+                Icon(
+                  Icons.chevron_right,
+                  size: 16,
+                  color: _highlighted
+                      ? AppColors.primaryText
+                      : AppColors.secondaryText,
+                ),
               ],
             ),
           ),

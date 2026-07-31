@@ -13,6 +13,7 @@ import '../../core/theme/app_typography.dart';
 import '../../core/platform/platform_service.dart';
 import '../../core/platform/network_speed_monitor.dart';
 import '../../data/models/episode.dart';
+import '../../data/models/site.dart';
 import '../../data/models/watch_history.dart';
 import '../../data/local/history_storage.dart';
 import '../../data/local/player_settings_storage.dart';
@@ -34,7 +35,7 @@ bool _isPlayPauseKey(LogicalKeyboardKey key) =>
 /// 全屏播放页
 class PlayerScreen extends ConsumerStatefulWidget {
   final String videoId;
-  final String siteKey;
+  final Site site;
   final String videoTitle;
   final String cover;
   final List<List<Episode>> episodeGroups;
@@ -47,7 +48,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({
     super.key,
     required this.videoId,
-    required this.siteKey,
+    required this.site,
     required this.videoTitle,
     required this.cover,
     required this.episodeGroups,
@@ -127,6 +128,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   // 续播：_resumePositionMs > 0 时，duration 确定后自动 seek
   int _resumePositionMs = 0;
+  int _playRequestId = 0;
 
   // ── 计算属性 ──
 
@@ -292,6 +294,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     // 播放期间保持屏幕常亮：酷开等 Android TV ROM 屏保触发后会杀掉前台 App
     WakelockPlus.enable();
+    unawaited(PlatformService.setKeepScreenOn(true));
 
     // TV：隐藏系统导航栏进入沉浸式全屏
     if (PlatformService.isTv) {
@@ -317,7 +320,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   @override
   void dispose() {
+    _playRequestId++;
     WakelockPlus.disable();
+    unawaited(PlatformService.setKeepScreenOn(false));
     _hideTimer?.cancel();
     _seekHoldTimer?.cancel();
     _errorTimer?.cancel();
@@ -419,8 +424,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _stuckTimer = null;
   }
 
-  void _playCurrentEpisode() {
-    final url = _current.url;
+  Future<void> _playCurrentEpisode() async {
+    final requestId = ++_playRequestId;
+    final episode = _current;
+    var url = episode.url;
+    var headers = episode.headers;
     if (url.isEmpty) return;
     _errorTimer?.cancel();
     setState(() {
@@ -434,7 +442,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _buffStartAt = DateTime.now();
     });
     _armStuckTimer();
-    _engine.open(url);
+    try {
+      if (widget.site.isBridge && episode.requiresResolve) {
+        final result = await ref
+            .read(cmsApiProvider)
+            .resolvePlayUrl(
+              site: widget.site,
+              flag: episode.sourceFlag,
+              rawUrl: episode.url,
+            );
+        if (!mounted || requestId != _playRequestId) return;
+        url = result.url;
+        headers = result.headers;
+      }
+      await _engine.open(url, headers: headers);
+    } catch (error) {
+      if (!mounted || requestId != _playRequestId) return;
+      _disarmStuckTimer();
+      setState(() {
+        _buffering = false;
+        _error = '播放地址解析失败：$error';
+      });
+    }
   }
 
   void _switchEpisode(int groupIndex, int episodeIndex) {
@@ -997,7 +1026,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _historyStorage.save(
       WatchHistory(
         videoId: widget.videoId,
-        siteKey: widget.siteKey,
+        siteKey: widget.site.key,
         title: widget.videoTitle,
         cover: widget.cover,
         episodeName: _current.name,

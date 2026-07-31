@@ -108,11 +108,9 @@ class MediaKitEngine implements VideoEngine {
         _trackById[t.id] = t;
       }
       final usable = tracks.video
-          .where((t) =>
-              t.id != 'auto' &&
-              t.id != 'no' &&
-              t.w != null &&
-              t.h != null)
+          .where(
+            (t) => t.id != 'auto' && t.id != 'no' && t.w != null && t.h != null,
+          )
           .toList();
       usable.sort((a, b) => (b.h ?? 0).compareTo(a.h ?? 0));
       _qualitiesCtrl.add(usable.map(_toQuality).toList(growable: false));
@@ -131,11 +129,7 @@ class MediaKitEngine implements VideoEngine {
 
   VideoQuality _toQuality(VideoTrack t) {
     if (t.id == 'auto' || t.id == 'no') return const VideoQuality.auto();
-    return VideoQuality(
-      id: t.id,
-      width: t.w,
-      height: t.h,
-    );
+    return VideoQuality(id: t.id, width: t.w, height: t.h);
   }
 
   @override
@@ -160,11 +154,11 @@ class MediaKitEngine implements VideoEngine {
   Stream<List<VideoQuality>> get qualitiesStream => _qualitiesCtrl.stream;
 
   @override
-  Stream<VideoQuality> get currentQualityStream =>
-      _currentQualityCtrl.stream;
+  Stream<VideoQuality> get currentQualityStream => _currentQualityCtrl.stream;
 
   @override
-  Future<void> open(String url) => _player.open(Media(url));
+  Future<void> open(String url, {Map<String, String>? headers}) =>
+      _player.open(Media(url, httpHeaders: headers));
 
   @override
   Future<void> play() => _player.play();
@@ -195,10 +189,7 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Widget buildVideoView() {
-    return Video(
-      controller: _controller,
-      controls: NoVideoControls,
-    );
+    return Video(controller: _controller, controls: NoVideoControls);
   }
 
   @override

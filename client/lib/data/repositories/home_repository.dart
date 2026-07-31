@@ -20,22 +20,23 @@ class HomeRepository {
 
     // 并发请求所有 Site 的分类
     final results = await Future.wait(
-      sites.map((site) => _api.fetchCategories(site).catchError((_) => <Category>[])),
+      sites.map(
+        (site) => _api.fetchCategories(site).catchError((_) => <Category>[]),
+      ),
     );
-
-    // 合并所有分类
-    final all = results.expand((list) => list).toList();
 
     // 苹果 CMS 分类是两级结构：
     // typePid == 0 → 顶级父分类（电影/电视剧/动漫），无直接内容
     // typePid >  0 → 子分类（动作片/爱情片等），有实际内容
-    // 若存在子分类，只保留子分类；否则保留全部（兼容单层站点）
-    final hasSubs = all.any((c) => c.typePid > 0);
-    final filtered = hasSubs ? all.where((c) => c.typePid > 0).toList() : all;
-
-    // 去重（按 name，保留第一个）
-    final seen = <String>{};
-    final dynamic = filtered.where((c) => seen.add(c.name)).toList();
+    // 必须逐站点判断：一个两级站点不能把另一个单层站点的全部分类过滤掉。
+    // 不按名称跨站去重；同名分类属于不同数据源，身份是 siteKey + id。
+    final dynamic = <Category>[];
+    for (final categories in results) {
+      final hasSubs = categories.any((c) => c.typePid > 0);
+      dynamic.addAll(
+        hasSubs ? categories.where((c) => c.typePid > 0) : categories,
+      );
+    }
 
     // 按用户观看历史排序：观看 ≥3 次的分类靠前，按次数降序
     if (categoryWeights.isNotEmpty) {
@@ -58,5 +59,4 @@ class HomeRepository {
     required Site site,
     required String categoryId,
   }) => _api.fetchVideoList(site: site, categoryId: categoryId, page: 1);
-
 }

@@ -52,13 +52,19 @@ final categoriesProvider = FutureProvider<List<Category>>((ref) async {
 /// 完全自包含，绝不抛异常。
 final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
   final categories = await ref.watch(categoriesProvider.future);
-  final dynamicCats =
-      categories.where((c) => c.type == CategoryType.dynamic).toList();
+  final dynamicCats = categories
+      .where((c) => c.type == CategoryType.dynamic)
+      .toList();
   if (dynamicCats.isEmpty) return [];
 
   try {
     final first = dynamicCats.first;
-    final result = await ref.read(categoryItemsProvider(first.id).future);
+    final result = await ref.read(
+      categoryItemsProvider((
+        siteKey: first.siteKey,
+        categoryId: first.id,
+      )).future,
+    );
     final items = List<VideoItem>.from(result.items);
     if (items.isEmpty) return [];
     items.shuffle();
@@ -75,18 +81,17 @@ final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
 final _railSemaphore = _AsyncSemaphore(4);
 
 /// 每个分类行的内容（family：会话级缓存，避免滚动时重复请求导致数据错乱）
-final categoryItemsProvider = FutureProvider.family<VideoListResult, String>(
-  (ref, categoryId) async {
-    final categories = await ref.watch(categoriesProvider.future);
-    final sites = ref.watch(sitesProvider);
-    final category = categories.firstWhere((c) => c.id == categoryId);
-    final site = sites.firstWhere((s) => s.key == category.siteKey);
-    final repo = ref.read(homeRepositoryProvider);
-    return _railSemaphore.run(
-      () => repo.getCategoryItems(site: site, categoryId: categoryId),
-    );
-  },
-);
+typedef CategoryItemsKey = ({String siteKey, String categoryId});
+
+final categoryItemsProvider =
+    FutureProvider.family<VideoListResult, CategoryItemsKey>((ref, key) async {
+      final sites = ref.watch(sitesProvider);
+      final site = sites.firstWhere((s) => s.key == key.siteKey);
+      final repo = ref.read(homeRepositoryProvider);
+      return _railSemaphore.run(
+        () => repo.getCategoryItems(site: site, categoryId: key.categoryId),
+      );
+    });
 
 /// 简单异步信号量。任务排队，先到先获 permit，释放后唤醒下一个等待者。
 class _AsyncSemaphore {
@@ -117,22 +122,28 @@ class _AsyncSemaphore {
 
 /// 通过 main.dart 的 ProviderScope.overrides 注入已初始化实例
 final historyStorageProvider = Provider<HistoryStorage>(
-  (ref) => throw UnimplementedError('historyStorageProvider must be overridden'),
+  (ref) =>
+      throw UnimplementedError('historyStorageProvider must be overridden'),
 );
 
 /// 通过 main.dart 的 ProviderScope.overrides 注入已初始化实例
 final favoriteStorageProvider = Provider<FavoriteStorage>(
-  (ref) => throw UnimplementedError('favoriteStorageProvider must be overridden'),
+  (ref) =>
+      throw UnimplementedError('favoriteStorageProvider must be overridden'),
 );
 
 /// 通过 main.dart 的 ProviderScope.overrides 注入已初始化实例
 final playerSettingsStorageProvider = Provider<PlayerSettingsStorage>(
-  (ref) => throw UnimplementedError('playerSettingsStorageProvider must be overridden'),
+  (ref) => throw UnimplementedError(
+    'playerSettingsStorageProvider must be overridden',
+  ),
 );
 
 /// 通过 main.dart 的 ProviderScope.overrides 注入已初始化实例
 final searchHistoryStorageProvider = Provider<SearchHistoryStorage>(
-  (ref) => throw UnimplementedError('searchHistoryStorageProvider must be overridden'),
+  (ref) => throw UnimplementedError(
+    'searchHistoryStorageProvider must be overridden',
+  ),
 );
 
 /// 观看历史（本地 Hive）

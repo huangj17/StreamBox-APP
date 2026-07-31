@@ -31,9 +31,12 @@ class SourceConfig {
 
   /// 筛选出标准苹果 CMS 站点（api 是 http 开头，非 csp_ 或 js 脚本）
   List<Site> get cmsSites => sites.where((s) {
-        final api = s.api.toLowerCase();
-        return api.startsWith('http') && !api.endsWith('.js');
-      }).toList();
+    final api = s.api.toLowerCase();
+    return !s.isBridge &&
+        s.type != 4 &&
+        api.startsWith('http') &&
+        !api.endsWith('.js');
+  }).toList();
 }
 
 /// 直播源
@@ -49,10 +52,10 @@ class LiveSource {
   });
 
   factory LiveSource.fromJson(Map<String, dynamic> json) => LiveSource(
-        name: json['name'] as String? ?? '',
-        url: json['url'] as String? ?? '',
-        playerType: json['playerType'] as int? ?? 0,
-      );
+    name: json['name'] as String? ?? '',
+    url: json['url'] as String? ?? '',
+    playerType: json['playerType'] as int? ?? 0,
+  );
 }
 
 /// 解析线路
@@ -63,7 +66,7 @@ class ParseRule {
   const ParseRule({required this.name, required this.url});
 
   factory ParseRule.fromJson(Map<String, dynamic> json) => ParseRule(
-        name: json['name'] as String? ?? '',
-        url: json['url'] as String? ?? '',
-      );
+    name: json['name'] as String? ?? '',
+    url: json['url'] as String? ?? '',
+  );
 }

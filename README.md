@@ -33,7 +33,22 @@ StreamBox (Flutter)  --HTTP-->  JAR Bridge (JVM)  --Spider-->  内容站点
 
 ## 快速开始
 
-无根级构建工具。命令必须在子项目目录下执行。
+根目录的 `dev.sh` 封装了两个子项目的常用命令，不用手动 `cd`：
+
+```bash
+./dev.sh            # Bridge（后台）+ 客户端（前台），退出时自动收掉 Bridge
+./dev.sh bridge     # 只启动 JAR Bridge
+./dev.sh client     # 只启动 Flutter 客户端
+./dev.sh stop       # 停掉后台 Bridge
+./dev.sh test       # 两个子项目的 analyze + test
+./dev.sh build      # 两个子项目的构建
+./dev.sh --help     # 全部用法
+
+DEVICE=chrome ./dev.sh client        # 换目标设备
+./dev.sh client --verbose            # 额外参数透传给 flutter run
+```
+
+也可以按下面的方式手动在子项目目录下执行。
 
 ### 仅 CMS 源（不需要 JAR 插件）
 

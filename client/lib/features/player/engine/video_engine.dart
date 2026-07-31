@@ -7,24 +7,18 @@ class VideoQuality {
   final int? height;
   final int? bitrate; // bits per second
 
-  const VideoQuality({
-    required this.id,
-    this.width,
-    this.height,
-    this.bitrate,
-  });
+  const VideoQuality({required this.id, this.width, this.height, this.bitrate});
 
   const VideoQuality.auto()
-      : id = 'auto',
-        width = null,
-        height = null,
-        bitrate = null;
+    : id = 'auto',
+      width = null,
+      height = null,
+      bitrate = null;
 
   bool get isAuto => id == 'auto';
 
   @override
-  bool operator ==(Object other) =>
-      other is VideoQuality && other.id == id;
+  bool operator ==(Object other) => other is VideoQuality && other.id == id;
 
   @override
   int get hashCode => id.hashCode;
@@ -54,7 +48,7 @@ abstract class VideoEngine {
   Stream<VideoQuality> get currentQualityStream;
 
   // ── 动作 ──
-  Future<void> open(String url);
+  Future<void> open(String url, {Map<String, String>? headers});
   Future<void> play();
   Future<void> pause();
   Future<void> playOrPause();

@@ -1,13 +1,21 @@
 package com.streambox.bridge.spider
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runInterruptible
 import org.slf4j.LoggerFactory
 import java.net.URLClassLoader
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.HashMap
 import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 单个 Spider 实例的线程安全封装。
@@ -24,22 +32,49 @@ class SpiderWrapper(
 
     private val logger = LoggerFactory.getLogger("SpiderWrapper[$key]")
 
-    private val executor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "spider-$key").apply { isDaemon = true }
-    }
+    private val unavailable = AtomicBoolean(false)
+    private val pendingFutures = ConcurrentHashMap.newKeySet<Future<*>>()
+    private val executor = ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(32),
+        { runnable -> Thread(runnable, "spider-$key").apply { isDaemon = true } },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
 
-    private fun <T> invoke(methodName: String, block: () -> T): Result<T> {
+    private suspend fun <T> invoke(methodName: String, block: () -> T): Result<T> {
+        if (unavailable.get()) {
+            return Result.failure(
+                SpiderUnavailableException("Plugin '$key' is unavailable after a timed-out call")
+            )
+        }
         val start = System.currentTimeMillis()
+        var future: Future<T>? = null
         return try {
-            val future = executor.submit(Callable { block() })
-            val result = future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            val submitted = executor.submit(Callable { block() })
+            future = submitted
+            pendingFutures.add(submitted)
+            val result = runInterruptible(Dispatchers.IO) {
+                submitted.get(timeoutMs, TimeUnit.MILLISECONDS)
+            }
             val elapsed = System.currentTimeMillis() - start
             logger.debug("{} completed in {}ms", methodName, elapsed)
             Result.success(result)
         } catch (e: TimeoutException) {
             val elapsed = System.currentTimeMillis() - start
             logger.warn("{} timed out after {}ms", methodName, elapsed)
+            future?.cancel(true)
+            markUnavailable()
             Result.failure(SpiderTimeoutException("Plugin '$key' method '$methodName' timed out after ${timeoutMs}ms"))
+        } catch (e: CancellationException) {
+            future?.cancel(true)
+            throw e
+        } catch (_: RejectedExecutionException) {
+            Result.failure(
+                SpiderUnavailableException("Plugin '$key' is busy or unavailable")
+            )
         } catch (e: ExecutionException) {
             val elapsed = System.currentTimeMillis() - start
             logger.error("{} failed after {}ms", methodName, elapsed, e.cause)
@@ -47,20 +82,32 @@ class SpiderWrapper(
         } catch (e: Exception) {
             logger.error("{} unexpected error", methodName, e)
             Result.failure(e)
+        } finally {
+            future?.let(pendingFutures::remove)
         }
     }
 
-    fun homeContent(filter: Boolean): Result<String> = invoke("homeContent") {
+    val isAvailable: Boolean
+        get() = !unavailable.get()
+
+    private fun markUnavailable() {
+        if (unavailable.compareAndSet(false, true)) {
+            pendingFutures.forEach { it.cancel(true) }
+            executor.shutdownNow()
+        }
+    }
+
+    suspend fun homeContent(filter: Boolean): Result<String> = invoke("homeContent") {
         val m = clazz.getMethod("homeContent", Boolean::class.javaPrimitiveType)
         m.invoke(instance, filter) as? String ?: "{}"
     }
 
-    fun homeVideoContent(): Result<String> = invoke("homeVideoContent") {
+    suspend fun homeVideoContent(): Result<String> = invoke("homeVideoContent") {
         val m = clazz.getMethod("homeVideoContent")
         m.invoke(instance) as? String ?: "{\"list\":[]}"
     }
 
-    fun categoryContent(
+    suspend fun categoryContent(
         tid: String,
         pg: String,
         filter: Boolean,
@@ -74,12 +121,12 @@ class SpiderWrapper(
         m.invoke(instance, tid, pg, filter, extend) as? String ?: "{}"
     }
 
-    fun detailContent(ids: List<String>): Result<String> = invoke("detailContent") {
+    suspend fun detailContent(ids: List<String>): Result<String> = invoke("detailContent") {
         val m = clazz.getMethod("detailContent", List::class.java)
         m.invoke(instance, ids) as? String ?: "{}"
     }
 
-    fun playerContent(flag: String, id: String, vipFlags: List<String>): Result<String> =
+    suspend fun playerContent(flag: String, id: String, vipFlags: List<String>): Result<String> =
         invoke("playerContent") {
             val m = clazz.getMethod(
                 "playerContent",
@@ -88,13 +135,13 @@ class SpiderWrapper(
             m.invoke(instance, flag, id, vipFlags) as? String ?: "{}"
         }
 
-    fun searchContent(key: String, quick: Boolean): Result<String> = invoke("searchContent") {
+    suspend fun searchContent(key: String, quick: Boolean): Result<String> = invoke("searchContent") {
         val m = clazz.getMethod("searchContent", String::class.java, Boolean::class.javaPrimitiveType)
         m.invoke(instance, key, quick) as? String ?: "{\"list\":[]}"
     }
 
     override fun close() {
-        executor.shutdownNow()
+        markUnavailable()
         try {
             classLoader.close()
         } catch (_: Exception) {

@@ -25,10 +25,13 @@ import 'providers/detail_provider.dart';
 class DetailScreen extends ConsumerWidget {
   final Site site;
   final String videoId;
+
   /// 来自「继续观看」的历史线路索引（可选）
   final int? initialGroupIndex;
+
   /// 来自「继续观看」的历史集数索引，用于续播定位（可选）
   final int? initialEpisodeIndex;
+
   /// 来自「继续观看」的历史播放位置（毫秒），用于续播定位（可选）
   final int? initialPositionMs;
 
@@ -43,19 +46,16 @@ class DetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final detail =
-        ref.watch(videoDetailProvider((site: site, videoId: videoId)));
+    final detail = ref.watch(
+      videoDetailProvider((site: site, videoId: videoId)),
+    );
 
     return Scaffold(
       body: detail.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Stack(
           children: [
-            const Positioned(
-              top: 44,
-              left: 8,
-              child: TvBackButton(),
-            ),
+            const Positioned(top: 44, left: 8, child: TvBackButton()),
             Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -72,7 +72,8 @@ class DetailScreen extends ConsumerWidget {
                     autofocus: true,
                     debugLabel: 'detail-error-retry',
                     onActivate: () => ref.invalidate(
-                        videoDetailProvider((site: site, videoId: videoId))),
+                      videoDetailProvider((site: site, videoId: videoId)),
+                    ),
                   ),
                 ],
               ),
@@ -172,16 +173,18 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       if (url.isEmpty || !url.startsWith('http')) return;
       final host = Uri.tryParse(url)?.host;
       if (host == null || host.isEmpty) return;
-      await InternetAddress.lookup(host)
-          .timeout(const Duration(seconds: 2));
+      await InternetAddress.lookup(host).timeout(const Duration(seconds: 2));
     } catch (_) {
       // 预热失败（DNS 超时 / 无网）均静默
     }
   }
 
-  int? get _effectiveGroupIndex => widget.initialGroupIndex ?? _resumeGroupIndex;
-  int? get _effectiveEpisodeIndex => widget.initialEpisodeIndex ?? _resumeEpisodeIndex;
-  int? get _effectivePositionMs => widget.initialPositionMs ?? _resumePositionMs;
+  int? get _effectiveGroupIndex =>
+      widget.initialGroupIndex ?? _resumeGroupIndex;
+  int? get _effectiveEpisodeIndex =>
+      widget.initialEpisodeIndex ?? _resumeEpisodeIndex;
+  int? get _effectivePositionMs =>
+      widget.initialPositionMs ?? _resumePositionMs;
 
   void _toggleFavorite() {
     final storage = ref.read(favoriteStorageProvider);
@@ -191,16 +194,18 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     if (_isFavorited) {
       storage.remove('${videoId}_$siteKey');
     } else {
-      storage.add(FavoriteItem(
-        videoId: videoId,
-        siteKey: siteKey,
-        title: widget.vod.vodName,
-        cover: widget.vod.vodPic,
-        year: widget.vod.vodYear,
-        category: widget.vod.vodClass,
-        remarks: widget.vod.vodRemarks,
-        createdAt: DateTime.now(),
-      ));
+      storage.add(
+        FavoriteItem(
+          videoId: videoId,
+          siteKey: siteKey,
+          title: widget.vod.vodName,
+          cover: widget.vod.vodPic,
+          year: widget.vod.vodYear,
+          category: widget.vod.vodClass,
+          remarks: widget.vod.vodRemarks,
+          createdAt: DateTime.now(),
+        ),
+      );
     }
 
     setState(() => _isFavorited = !_isFavorited);
@@ -268,8 +273,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     label: '复制链接',
                     debugLabel: 'episode-menu-copy',
                     onActivate: () async {
-                      await Clipboard.setData(
-                          ClipboardData(text: ep.url));
+                      await Clipboard.setData(ClipboardData(text: ep.url));
                       if (!dialogCtx.mounted) return;
                       Navigator.of(dialogCtx).pop();
                       if (!context.mounted) return;
@@ -298,18 +302,21 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     required int episodeIndex,
     int positionMs = 0,
   }) async {
-    await context.push('/player', extra: {
-      'videoId': widget.vod.vodId.toString(),
-      'siteKey': widget.site.key,
-      'videoTitle': widget.vod.vodName,
-      'cover': widget.vod.vodPic,
-      'episodeGroups': groups,
-      'sourceNames': sourceNames,
-      'initialGroupIndex': groupIndex,
-      'initialEpisodeIndex': episodeIndex,
-      'initialPositionMs': positionMs,
-      'category': widget.vod.vodClass,
-    });
+    await context.push(
+      '/player',
+      extra: {
+        'videoId': widget.vod.vodId.toString(),
+        'site': widget.site,
+        'videoTitle': widget.vod.vodName,
+        'cover': widget.vod.vodPic,
+        'episodeGroups': groups,
+        'sourceNames': sourceNames,
+        'initialGroupIndex': groupIndex,
+        'initialEpisodeIndex': episodeIndex,
+        'initialPositionMs': positionMs,
+        'category': widget.vod.vodClass,
+      },
+    );
 
     // 播放器返回后，刷新历史记录以便下次播放能续播
     if (!mounted) return;
@@ -335,8 +342,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     final vod = widget.vod;
     final groups = vod.episodeGroups;
     final sourceNames = vod.sourceNames;
-    final isCompactPage =
-        MediaQuery.sizeOf(context).width < 600;
+    final isCompactPage = MediaQuery.sizeOf(context).width < 600;
     final pageHPad = isCompactPage ? AppSpacing.md : AppSpacing.xl;
 
     final coverSeed = '${widget.site.key}:${vod.vodId}';
@@ -414,7 +420,8 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                   final posterH = isCompact ? 150.0 : 300.0;
                   final gap = isCompact ? AppSpacing.sm : AppSpacing.lg;
 
-                  final hasPlay = groups.isNotEmpty &&
+                  final hasPlay =
+                      groups.isNotEmpty &&
                       groups[0].isNotEmpty &&
                       groups[0][0].url.isNotEmpty;
 
@@ -422,18 +429,19 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                   final hasResume = hasPlay && resumeMs > 0;
                   final isSeries = groups.any((g) => g.length > 1);
                   final resumeGi = hasPlay
-                      ? (_effectiveGroupIndex ?? 0)
-                          .clamp(0, groups.length - 1)
+                      ? (_effectiveGroupIndex ?? 0).clamp(0, groups.length - 1)
                       : 0;
                   final resumeEi = hasPlay
-                      ? (_effectiveEpisodeIndex ?? 0)
-                          .clamp(0, groups[resumeGi].length - 1)
+                      ? (_effectiveEpisodeIndex ?? 0).clamp(
+                          0,
+                          groups[resumeGi].length - 1,
+                        )
                       : 0;
                   final playLabel = hasResume
                       ? (isSeries
-                          ? '继续 ${groups[resumeGi][resumeEi].name} '
-                              '${_formatHms(resumeMs)}'
-                          : '继续观看 ${_formatHms(resumeMs)}')
+                            ? '继续 ${groups[resumeGi][resumeEi].name} '
+                                  '${_formatHms(resumeMs)}'
+                            : '继续观看 ${_formatHms(resumeMs)}')
                       : '播放';
 
                   final actions = <Widget>[
@@ -531,8 +539,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                       if (vod.vodRemarks?.isNotEmpty == true)
                         _MetaChip(vod.vodRemarks!),
                       if (_hasScore(vod.vodDoubanScore))
-                        _MetaChip('豆瓣 ${vod.vodDoubanScore}',
-                            highlight: true),
+                        _MetaChip('豆瓣 ${vod.vodDoubanScore}', highlight: true),
                       if (!_hasScore(vod.vodDoubanScore) &&
                           _hasScore(vod.vodScore))
                         _MetaChip('评分 ${vod.vodScore}', highlight: true),
@@ -544,8 +551,9 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           padding: const EdgeInsets.only(top: AppSpacing.sm),
                           child: Text(
                             '导演：${vod.vodDirector}',
-                            style: AppTypography.caption
-                                .copyWith(color: AppColors.secondaryText),
+                            style: AppTypography.caption.copyWith(
+                              color: AppColors.secondaryText,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -556,8 +564,9 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           padding: const EdgeInsets.only(top: AppSpacing.xs),
                           child: Text(
                             '演员：${vod.vodActor}',
-                            style: AppTypography.caption
-                                .copyWith(color: AppColors.secondaryText),
+                            style: AppTypography.caption.copyWith(
+                              color: AppColors.secondaryText,
+                            ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -586,8 +595,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                               SizedBox(width: gap),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     title,
                                     const SizedBox(height: AppSpacing.xs),
@@ -665,8 +673,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 },
               ),
             ),
-            const SliverToBoxAdapter(
-                child: SizedBox(height: AppSpacing.lg)),
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
 
             // 剧集分组
             for (var i = 0; i < groups.length; i++) ...[
@@ -678,9 +685,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     bottom: AppSpacing.sm,
                   ),
                   child: Text(
-                    sourceNames.length > i
-                        ? sourceNames[i]
-                        : '线路 ${i + 1}',
+                    sourceNames.length > i ? sourceNames[i] : '线路 ${i + 1}',
                     style: AppTypography.headline2,
                   ),
                 ),
@@ -705,22 +710,22 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           onActivate: disabled
                               ? null
                               : () => _openPlayer(
-                                    context,
-                                    groups: groups,
-                                    sourceNames: sourceNames,
-                                    groupIndex: i,
-                                    episodeIndex: j,
-                                  ),
+                                  context,
+                                  groups: groups,
+                                  sourceNames: sourceNames,
+                                  groupIndex: i,
+                                  episodeIndex: j,
+                                ),
                           onLongActivate: disabled
                               ? null
                               : () => _showEpisodeOptions(
-                                    context,
-                                    ep: ep,
-                                    groups: groups,
-                                    sourceNames: sourceNames,
-                                    groupIndex: i,
-                                    episodeIndex: j,
-                                  ),
+                                  context,
+                                  ep: ep,
+                                  groups: groups,
+                                  sourceNames: sourceNames,
+                                  groupIndex: i,
+                                  episodeIndex: j,
+                                ),
                         ),
                       );
                     },
@@ -728,8 +733,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                 ),
               ),
             ],
-            const SliverToBoxAdapter(
-                child: SizedBox(height: AppSpacing.xxl)),
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
           ],
         ),
       ],
@@ -791,8 +795,9 @@ class _MenuRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: AppTypography.body
-                      .copyWith(color: AppColors.primaryText),
+                  style: AppTypography.body.copyWith(
+                    color: AppColors.primaryText,
+                  ),
                 ),
               ),
             ],
@@ -962,8 +967,7 @@ class _EpisodeChip extends StatelessWidget {
           child: Text(
             label,
             style: AppTypography.caption.copyWith(
-              color:
-                  disabled ? AppColors.hintText : AppColors.primaryText,
+              color: disabled ? AppColors.hintText : AppColors.primaryText,
             ),
           ),
         );

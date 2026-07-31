@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -34,6 +37,7 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
   int _page = 1;
   int _pageCount = 1;
   bool _loading = false;
+  int _loadGeneration = 0;
 
   String? _selectedYear;
   bool _sortByScore = false;
@@ -48,6 +52,7 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
 
   @override
   void dispose() {
+    _loadGeneration++;
     _scrollController.dispose();
     super.dispose();
   }
@@ -61,6 +66,9 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
 
   Future<void> _loadPage() async {
     if (_loading || _page > _pageCount) return;
+    final generation = _loadGeneration;
+    final requestedPage = _page;
+    final requestedYear = _selectedYear;
     setState(() => _loading = true);
 
     try {
@@ -68,26 +76,33 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
       final result = await api.fetchVideoList(
         site: widget.site,
         categoryId: widget.category.id,
-        page: _page,
-        year: _selectedYear,
+        page: requestedPage,
+        year: requestedYear,
       );
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _items.addAll(result.items);
         _pageCount = result.pageCount;
-        _page++;
+        _page = requestedPage + 1;
+        _loading = false;
         _invalidateSortCache();
       });
-    } catch (_) {}
-
-    setState(() => _loading = false);
+    } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() => _loading = false);
+    }
   }
 
   void _resetAndReload() {
-    _items.clear();
-    _invalidateSortCache();
-    _page = 1;
-    _pageCount = 1;
-    _loadPage();
+    _loadGeneration++;
+    setState(() {
+      _items.clear();
+      _invalidateSortCache();
+      _page = 1;
+      _pageCount = 1;
+      _loading = false;
+    });
+    unawaited(_loadPage());
   }
 
   List<VideoItem> get _sortedItems {
@@ -105,10 +120,7 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
   }
 
   void _navigateToDetail(VideoItem video) {
-    context.push('/detail', extra: {
-      'site': widget.site,
-      'videoId': video.id,
-    });
+    context.push('/detail', extra: {'site': widget.site, 'videoId': video.id});
   }
 
   @override
@@ -125,7 +137,10 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
           // ── 筛选栏 ──
           Padding(
             padding: const EdgeInsets.fromLTRB(
-              AppSpacing.xl, AppSpacing.sm, AppSpacing.xl, AppSpacing.sm,
+              AppSpacing.xl,
+              AppSpacing.sm,
+              AppSpacing.xl,
+              AppSpacing.sm,
             ),
             child: Row(
               children: [
@@ -177,54 +192,61 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
             child: _items.isEmpty && _loading
                 ? const Center(
                     child: CircularProgressIndicator(
-                        color: AppColors.netflixRed),
+                      color: AppColors.netflixRed,
+                    ),
                   )
                 : _items.isEmpty && !_loading
-                    ? Center(
-                        child: Text('暂无内容',
-                            style: AppTypography.body
-                                .copyWith(color: AppColors.hintText)),
-                      )
-                    : GridView.builder(
-                        controller: _scrollController,
-                        cacheExtent: 400, // 提前渲染 400dp，减少快速滚动白屏
-                        padding: const EdgeInsets.fromLTRB(
-                          AppSpacing.xl, AppSpacing.sm,
-                          AppSpacing.xl, AppSpacing.xxl,
-                        ),
-                        gridDelegate:
-                            SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: crossAxisCount,
-                          childAspectRatio:
-                              AppSpacing.cardWidth / AppSpacing.cardHeight,
-                          crossAxisSpacing: AppSpacing.md,
-                          mainAxisSpacing: AppSpacing.md + 40,
-                        ),
-                        itemCount:
-                            sorted.length + (_page <= _pageCount ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (index >= sorted.length) {
-                            return const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(AppSpacing.md),
-                                child: CircularProgressIndicator(
-                                    color: AppColors.netflixRed,
-                                    strokeWidth: 2),
-                              ),
-                            );
-                          }
-                          final video = sorted[index];
-                          return VideoCard(
-                            video: video,
-                            onSelected: () => _navigateToDetail(video),
-                            onFocused: () {},
-                            // TV/桌面键盘进页面把默认焦点落在第一张卡，
-                            // 不然用户按方向键不知道焦点在哪
-                            autofocus: index == 0 &&
-                                PlatformService.needsFocusSystem,
-                          );
-                        },
+                ? Center(
+                    child: Text(
+                      '暂无内容',
+                      style: AppTypography.body.copyWith(
+                        color: AppColors.hintText,
                       ),
+                    ),
+                  )
+                : GridView.builder(
+                    controller: _scrollController,
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(
+                      400,
+                    ), // 提前渲染 400dp，减少快速滚动白屏
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.xl,
+                      AppSpacing.sm,
+                      AppSpacing.xl,
+                      AppSpacing.xxl,
+                    ),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: crossAxisCount,
+                      childAspectRatio:
+                          AppSpacing.cardWidth / AppSpacing.cardHeight,
+                      crossAxisSpacing: AppSpacing.md,
+                      mainAxisSpacing: AppSpacing.md + 40,
+                    ),
+                    itemCount: sorted.length + (_page <= _pageCount ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index >= sorted.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(AppSpacing.md),
+                            child: CircularProgressIndicator(
+                              color: AppColors.netflixRed,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        );
+                      }
+                      final video = sorted[index];
+                      return VideoCard(
+                        video: video,
+                        onSelected: () => _navigateToDetail(video),
+                        onFocused: () {},
+                        // TV/桌面键盘进页面把默认焦点落在第一张卡，
+                        // 不然用户按方向键不知道焦点在哪
+                        autofocus:
+                            index == 0 && PlatformService.needsFocusSystem,
+                      );
+                    },
+                  ),
           ),
         ],
       ),

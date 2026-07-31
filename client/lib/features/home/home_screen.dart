@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -100,8 +101,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             final pluginKey = storage.getSelectedBridgePlugin(selectedUrl);
             if (pluginKey != null) {
               final allSites = ref.read(sitesProvider);
-              final matched =
-                  allSites.where((s) => s.key == pluginKey).toList();
+              final matched = allSites
+                  .where((s) => s.key == pluginKey)
+                  .toList();
               if (matched.isNotEmpty) {
                 ref.read(sitesProvider.notifier).state = matched;
               }
@@ -181,18 +183,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         }
       }
 
-      await context.push('/player', extra: {
-        'videoId': detail.vodId.toString(),
-        'siteKey': site.key,
-        'videoTitle': detail.vodName,
-        'cover': detail.vodPic,
-        'episodeGroups': groups,
-        'sourceNames': detail.sourceNames,
-        'initialGroupIndex': gi,
-        'initialEpisodeIndex': ei,
-        'initialPositionMs': positionMs,
-        'category': detail.vodClass,
-      });
+      await context.push(
+        '/player',
+        extra: {
+          'videoId': detail.vodId.toString(),
+          'site': site,
+          'videoTitle': detail.vodName,
+          'cover': detail.vodPic,
+          'episodeGroups': groups,
+          'sourceNames': detail.sourceNames,
+          'initialGroupIndex': gi,
+          'initialEpisodeIndex': ei,
+          'initialPositionMs': positionMs,
+          'category': detail.vodClass,
+        },
+      );
     } catch (_) {
       if (mounted) _navigateToDetail(video);
     }
@@ -210,8 +215,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final mainContent = _restoring
         ? _buildLoadingState()
         : sites.isEmpty
-            ? _buildSourceInput()
-            : _buildMainContent(categories, bannerItems, watchHistory);
+        ? _buildSourceInput()
+        : _buildMainContent(categories, bannerItems, watchHistory);
 
     return HomeFocusAnchors(
       bannerPlay: _bannerPlayFocus,
@@ -274,10 +279,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 selectedFontSize: 12,
                 unselectedFontSize: 12,
                 items: const [
-                  BottomNavigationBarItem(
-                    icon: Icon(Icons.home),
-                    label: '首页',
-                  ),
+                  BottomNavigationBarItem(icon: Icon(Icons.home), label: '首页'),
                   BottomNavigationBarItem(
                     icon: Icon(Icons.search),
                     label: '搜索',
@@ -304,7 +306,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           children: [
             Text(
               'StreamBox',
-              style: AppTypography.display.copyWith(color: AppColors.netflixRed),
+              style: AppTypography.display.copyWith(
+                color: AppColors.netflixRed,
+              ),
             ),
             const SizedBox(height: AppSpacing.lg),
             const Icon(
@@ -313,16 +317,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               size: 56,
             ),
             const SizedBox(height: AppSpacing.md),
-            Text(
-              '还没有配置片源',
-              style: AppTypography.body,
-            ),
+            Text('还没有配置片源', style: AppTypography.body),
             const SizedBox(height: AppSpacing.sm),
             Text(
               '前往设置 → 配置源管理添加源',
-              style: AppTypography.caption.copyWith(
-                color: AppColors.hintText,
-              ),
+              style: AppTypography.caption.copyWith(color: AppColors.hintText),
             ),
             const SizedBox(height: AppSpacing.xl),
             _ErrorActionButton(
@@ -363,8 +362,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
         return CustomScrollView(
           controller: _scrollController,
-          // cacheExtent 覆盖多条 rail，方向键焦点跨 rail 导航时有足够候选
-          cacheExtent: 1500,
+          // scrollCacheExtent 覆盖多条 rail，方向键焦点跨 rail 导航时有足够候选
+          scrollCacheExtent: const ScrollCacheExtent.pixels(1500),
           slivers: [
             // Hero Banner
             SliverToBoxAdapter(
@@ -387,9 +386,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
 
             // Banner 与内容行之间留白
-            const SliverToBoxAdapter(
-              child: SizedBox(height: AppSpacing.xl),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xl)),
 
             // 继续观看行（有历史时才显示）
             if (histories.isNotEmpty)
@@ -409,25 +406,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
             // 动态分类行
             SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final cat = dynamicCategories[index];
-                  // 没有「继续观看」时，dynamicCategories[0] 是首条 rail
-                  final isFirst = histories.isEmpty && index == 0;
-                  return _CategoryRailWrapper(
-                    category: cat,
-                    isFirstRail: isFirst,
-                    onItemSelected: _navigateToDetail,
-                  );
-                },
-                childCount: dynamicCategories.length,
-              ),
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final cat = dynamicCategories[index];
+                // 没有「继续观看」时，dynamicCategories[0] 是首条 rail
+                final isFirst = histories.isEmpty && index == 0;
+                return _CategoryRailWrapper(
+                  category: cat,
+                  isFirstRail: isFirst,
+                  onItemSelected: _navigateToDetail,
+                );
+              }, childCount: dynamicCategories.length),
             ),
 
             // 底部留白
-            const SliverToBoxAdapter(
-              child: SizedBox(height: AppSpacing.xxl),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxl)),
           ],
         );
       },
@@ -453,7 +445,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           const Icon(Icons.error_outline, color: AppColors.hintText, size: 48),
           const SizedBox(height: AppSpacing.md),
-          Text('$error', style: AppTypography.body, textAlign: TextAlign.center),
+          Text(
+            '$error',
+            style: AppTypography.body,
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: AppSpacing.lg),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -490,6 +486,7 @@ class _ErrorActionButton extends StatelessWidget {
   final bool autofocus;
   final FocusNode? focusNode;
   final VoidCallback onActivate;
+
   /// 按 ← 时退出到 SideNav（仅最左按钮传，确保焦点稳定回左栏）
   final VoidCallback? onLeftEscape;
 
@@ -576,7 +573,8 @@ class _CategoryRailWrapper extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final items = ref.watch(categoryItemsProvider(category.id));
+    final providerKey = (siteKey: category.siteKey, categoryId: category.id);
+    final items = ref.watch(categoryItemsProvider(providerKey));
     final sites = ref.read(sitesProvider);
 
     // 找到该分类所属的 Site
@@ -590,12 +588,12 @@ class _CategoryRailWrapper extends ConsumerWidget {
       items: items.whenData((result) => result.items),
       isFirstRail: isFirstRail,
       onItemSelected: onItemSelected,
-      onRetry: () => ref.invalidate(categoryItemsProvider(category.id)),
+      onRetry: () => ref.invalidate(categoryItemsProvider(providerKey)),
       onViewMore: site != null
-          ? () => context.push('/category', extra: {
-                'category': category,
-                'site': site,
-              })
+          ? () => context.push(
+              '/category',
+              extra: {'category': category, 'site': site},
+            )
           : null,
     );
   }

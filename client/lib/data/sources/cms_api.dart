@@ -5,6 +5,13 @@ import '../models/category.dart';
 import '../models/video_list_result.dart';
 import '../models/cms_video_detail.dart';
 
+class PlayResult {
+  final String url;
+  final Map<String, String> headers;
+
+  const PlayResult({required this.url, this.headers = const {}});
+}
+
 /// 苹果 CMS 网络请求层
 class CmsApi {
   final Dio _dio;
@@ -30,7 +37,10 @@ class CmsApi {
     final data = _decode(response);
     final list = data['class'] as List<dynamic>? ?? [];
     return list
-        .map((e) => Category.fromJson(e as Map<String, dynamic>, siteKey: site.key))
+        .map(
+          (e) =>
+              Category.fromJson(e as Map<String, dynamic>, siteKey: site.key),
+        )
         .toList();
   }
 
@@ -66,16 +76,52 @@ class CmsApi {
   }) async {
     final response = await _dio.get(
       site.api,
-      queryParameters: {
-        'ac': 'detail',
-        'ids': videoId,
-      },
+      queryParameters: {'ac': 'detail', 'ids': videoId},
       options: Options(sendTimeout: const Duration(seconds: 8)),
     );
     final data = _decode(response);
     final list = data['list'] as List<dynamic>? ?? [];
     if (list.isEmpty) return null;
     return CmsVideoDetail.fromJson(list[0] as Map<String, dynamic>);
+  }
+
+  /// 调用 JAR Bridge 的 playerContent，取得真实播放地址和必须透传的请求头。
+  Future<PlayResult> resolvePlayUrl({
+    required Site site,
+    required String flag,
+    required String rawUrl,
+  }) async {
+    if (!site.isBridge) {
+      throw ArgumentError.value(site.api, 'site', 'Site is not a JAR Bridge');
+    }
+    final response = await _dio.get(
+      '${site.api}/play',
+      queryParameters: {'flag': flag, 'id': rawUrl},
+      options: Options(
+        sendTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 20),
+      ),
+    );
+    final data = _decode(response);
+    final parse = switch (data['parse']) {
+      final num value => value.toInt(),
+      final String value => int.tryParse(value) ?? 0,
+      _ => 0,
+    };
+    if (parse != 0) {
+      throw const FormatException('该线路仍需要网页解析，当前播放器无法直接播放');
+    }
+    final url = data['url']?.toString().trim() ?? '';
+    if (url.isEmpty) {
+      throw const FormatException('Bridge 未返回有效播放地址');
+    }
+    final rawHeaders = data['header'];
+    final headers = rawHeaders is Map
+        ? rawHeaders.map(
+            (key, value) => MapEntry(key.toString(), value.toString()),
+          )
+        : const <String, String>{};
+    return PlayResult(url: url, headers: headers);
   }
 
   /// 搜索

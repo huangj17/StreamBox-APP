@@ -2,6 +2,7 @@ package com.streambox.bridge.api
 
 import com.streambox.bridge.spider.SpiderManager
 import com.streambox.bridge.spider.SpiderTimeoutException
+import com.streambox.bridge.spider.SpiderUnavailableException
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.response.*
@@ -9,12 +10,9 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
 import java.util.Base64
-import java.util.concurrent.TimeUnit
 
 private val json = Json { prettyPrint = false }
 private val routeLogger = LoggerFactory.getLogger("Routes")
@@ -23,10 +21,6 @@ private val routeLogger = LoggerFactory.getLogger("Routes")
 /// 捕获第二个 scheme 起的部分。仅在 JSON 字符串值（前面有 `"`）的位置生效，
 /// 避免误伤含 https:// 的正文。
 private val doubleSchemeRegex = Regex("\"https?://[^\"\\s]*?(https?://[^\"\\s]+)")
-private val httpClient = OkHttpClient.Builder()
-    .connectTimeout(10, TimeUnit.SECONDS)
-    .readTimeout(10, TimeUnit.SECONDS)
-    .build()
 private var startTime = System.currentTimeMillis()
 
 @Serializable
@@ -111,31 +105,40 @@ fun Application.configureRoutes(manager: SpiderManager) {
             val encodedUrl = call.request.queryParameters["url"]
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
             val encodedHeader = call.request.queryParameters["header"]
+            val signature = call.request.queryParameters["sig"]
+            if (!isAuthorizedProxyRequest(encodedUrl, encodedHeader, signature)) {
+                return@get call.respondError(403, "Invalid or missing proxy signature")
+            }
 
             try {
-                val realUrl = String(Base64.getDecoder().decode(encodedUrl))
-                val builder = Request.Builder().url(realUrl)
+                val realUrl = String(Base64.getDecoder().decode(encodedUrl), Charsets.UTF_8)
+                val headers = mutableMapOf<String, String>()
 
                 // 解码并应用 header
                 if (encodedHeader != null) {
                     try {
-                        val headerJson = JSONObject(String(Base64.getDecoder().decode(encodedHeader)))
+                        val headerJson = JSONObject(
+                            String(Base64.getDecoder().decode(encodedHeader), Charsets.UTF_8)
+                        )
                         headerJson.keys().forEach { key ->
-                            builder.addHeader(key, headerJson.getString(key))
+                            headers[key] = headerJson.getString(key)
                         }
                     } catch (_: Exception) {}
                 }
 
-                val response = httpClient.newCall(builder.build()).execute()
-                val body = response.body?.bytes()
-                if (body != null && response.isSuccessful) {
-                    val contentType = response.header("Content-Type") ?: "image/jpeg"
-                    call.respondBytes(body, ContentType.parse(contentType))
-                } else {
-                    call.respond(HttpStatusCode.BadGateway)
-                }
+                val payload = fetchProxyImage(realUrl, headers)
+                call.respondBytes(payload.bytes, ContentType.parse(payload.contentType))
+            } catch (e: UnsafeProxyTargetException) {
+                routeLogger.warn("Rejected unsafe proxy target: {}", e.message)
+                call.respondError(400, e.message ?: "Unsafe proxy target")
+            } catch (_: ProxyResponseTooLargeException) {
+                call.respond(
+                    HttpStatusCode.PayloadTooLarge,
+                    """{"code":413,"msg":"Proxy response exceeds 10 MiB"}""",
+                )
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError)
+                routeLogger.warn("Proxy request failed: {}", e.message)
+                call.respondError(502, "Proxy upstream request failed")
             }
         }
 
@@ -167,7 +170,8 @@ private suspend fun ApplicationCall.respondResult(result: Result<String>) {
                     // 把 Spider 返回的本地 proxy URL 替换为 Bridge 实际地址
                     val hostHeader = request.headers["Host"] ?: "localhost:${request.local.localPort}"
                     val bridgeBase = "http://$hostHeader"
-                    var fixed = jsonStr.replace("http://127.0.0.1:-1", bridgeBase)
+                    var fixed = authorizeLocalProxyUrls(jsonStr, bridgeBase)
+                    fixed = fixed.replace("http://127.0.0.1:-1", bridgeBase)
                     // 修复部分 spider 拼接 host 时重复出现两个 https://（如 ysj/doll）
                     // 形如 "https://www.dmmiku.comhttps://img.dmmiku.com/..." → 取后段
                     fixed = doubleSchemeRegex.replace(fixed, "\"$1")
@@ -180,6 +184,7 @@ private suspend fun ApplicationCall.respondResult(result: Result<String>) {
         onFailure = { err ->
             val code = when (err) {
                 is SpiderTimeoutException -> 504
+                is SpiderUnavailableException -> 503
                 else -> 500
             }
             respondError(code, err.message?.take(200) ?: "Unknown error")
@@ -190,7 +195,10 @@ private suspend fun ApplicationCall.respondResult(result: Result<String>) {
 private suspend fun ApplicationCall.respondError(code: Int, msg: String) {
     val status = when (code) {
         400 -> HttpStatusCode.BadRequest
+        403 -> HttpStatusCode.Forbidden
         404 -> HttpStatusCode.NotFound
+        502 -> HttpStatusCode.BadGateway
+        503 -> HttpStatusCode.ServiceUnavailable
         504 -> HttpStatusCode.GatewayTimeout
         else -> HttpStatusCode.InternalServerError
     }

@@ -4,9 +4,20 @@ services:
     ports:
       - "9978:9978"
     volumes:
-      - ./plugins:/app/plugins
-      - ./config.yml:/app/config.yml
+      - ./plugins:/app/plugins:ro
+      - ./config.yml:/app/config.yml:ro
       - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 384m
+    cpus: 2.0
+    init: true
     environment:
       - JAVA_OPTS=-Xmx256m
     restart: unless-stopped

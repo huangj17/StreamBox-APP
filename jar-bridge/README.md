@@ -58,7 +58,13 @@ java -jar build/libs/jar-bridge-all.jar  # 从打包的 JAR 启动
 docker compose up -d
 ```
 
-镜像基于 `eclipse-temurin:21-jre`，默认堆 256m。`plugins/`、`config.yml`、`data/` 通过 volume 挂载，便于热更新插件。
+镜像基于 `eclipse-temurin:21-jre`，默认堆 256m。Compose 默认以只读根文件系统运行，
+只允许写入 `data/`，并移除 Linux capabilities、禁止提权、限制进程数/内存/CPU。
+`plugins/` 与 `config.yml` 均以只读方式挂载。
+
+> JAR 插件是可执行代码，`URLClassLoader` 不是安全沙箱。不要在宿主机上用
+> `./gradlew run` 加载不可信插件；这类插件必须使用上述加固后的容器运行。
+> 容器仍允许外网访问（Spider 抓取所需），因此只应安装来源可信或已审计的 JAR。
 
 ## 配置说明
 

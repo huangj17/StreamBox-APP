@@ -4,7 +4,6 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
 import android.net.TrafficStats
-import android.os.Bundle
 import android.os.Process
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -12,13 +11,6 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // 窗口级屏幕常亮兜底：酷开等 Android TV ROM 对 PowerManager.WakeLock 不敏感，
-        // FLAG_KEEP_SCREEN_ON 会让系统屏保引擎直接跳过本窗口，比 wakelock_plus 更硬。
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -43,6 +35,16 @@ class MainActivity : FlutterActivity() {
                     } else {
                         result.success(bytes)
                     }
+                }
+                // 仅播放页开启窗口级常亮；离开播放页后必须清除，不能污染整个 App 生命周期。
+                "setKeepScreenOn" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    if (enabled) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(null)
                 }
                 else -> result.notImplemented()
             }

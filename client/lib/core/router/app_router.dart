@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:go_router/go_router.dart';
 import '../../data/models/site.dart';
 import '../../data/models/category.dart';
@@ -20,10 +21,7 @@ final appRouter = GoRouter(
   routes: [
     GoRoute(
       path: '/',
-      pageBuilder: (context, state) => _buildPage(
-        const HomeScreen(),
-        state,
-      ),
+      pageBuilder: (context, state) => _buildPage(const HomeScreen(), state),
     ),
     GoRoute(
       path: '/detail',
@@ -48,13 +46,11 @@ final appRouter = GoRouter(
         return _buildPage(
           PlayerScreen(
             videoId: extra['videoId'] as String,
-            siteKey: extra['siteKey'] as String,
+            site: extra['site'] as Site,
             videoTitle: extra['videoTitle'] as String,
             cover: extra['cover'] as String? ?? '',
-            episodeGroups:
-                extra['episodeGroups'] as List<List<Episode>>,
-            sourceNames:
-                (extra['sourceNames'] as List).cast<String>(),
+            episodeGroups: extra['episodeGroups'] as List<List<Episode>>,
+            sourceNames: (extra['sourceNames'] as List).cast<String>(),
             initialGroupIndex: extra['initialGroupIndex'] as int? ?? 0,
             initialEpisodeIndex: extra['initialEpisodeIndex'] as int? ?? 0,
             initialPositionMs: extra['initialPositionMs'] as int? ?? 0,
@@ -82,40 +78,29 @@ final appRouter = GoRouter(
       pageBuilder: (context, state) {
         final extra = state.extra as Map<String, dynamic>?;
         return _buildPage(
-          SearchScreen(
-            initialKeyword: extra?['keyword'] as String?,
-          ),
+          SearchScreen(initialKeyword: extra?['keyword'] as String?),
           state,
         );
       },
     ),
     GoRoute(
       path: '/source',
-      pageBuilder: (context, state) => _buildPage(
-        const SourceManagePage(),
-        state,
-      ),
+      pageBuilder: (context, state) =>
+          _buildPage(const SourceManagePage(), state),
     ),
     GoRoute(
       path: '/settings',
-      pageBuilder: (context, state) => _buildPage(
-        const SettingsScreen(),
-        state,
-      ),
+      pageBuilder: (context, state) =>
+          _buildPage(const SettingsScreen(), state),
     ),
     GoRoute(
       path: '/favorites',
-      pageBuilder: (context, state) => _buildPage(
-        const FavoritesScreen(),
-        state,
-      ),
+      pageBuilder: (context, state) =>
+          _buildPage(const FavoritesScreen(), state),
     ),
     GoRoute(
       path: '/history',
-      pageBuilder: (context, state) => _buildPage(
-        const HistoryScreen(),
-        state,
-      ),
+      pageBuilder: (context, state) => _buildPage(const HistoryScreen(), state),
     ),
   ],
 );
@@ -134,14 +119,14 @@ Page<dynamic> _buildPage(Widget child, GoRouterState state) {
     reverseTransitionDuration: const Duration(milliseconds: 200),
     transitionsBuilder: (context, animation, secondaryAnimation, child) {
       return SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.0, 0.0),
-          end: Offset.zero,
-        ).animate(CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOut,
-          reverseCurve: Curves.easeIn,
-        )),
+        position: Tween<Offset>(begin: const Offset(1.0, 0.0), end: Offset.zero)
+            .animate(
+              CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeOut,
+                reverseCurve: Curves.easeIn,
+              ),
+            ),
         child: child,
       );
     },

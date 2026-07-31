@@ -26,8 +26,14 @@ class NativeEngine implements VideoEngine {
 
   // 当前打开的 master / 源 URL（切画质或切 auto 时重开它）
   String _masterUrl = '';
+  Map<String, String> _masterHeaders = const {};
   // quality.id → sub-playlist URL（仅 HLS master 有效）
   final Map<String, String> _qualityUrlById = {};
+  int _openGeneration = 0;
+  bool _disposed = false;
+  bool _desiredPlaying = true;
+  double _playbackRate = 1.0;
+  double _volume = 1.0;
 
   VideoQuality _currentQuality = const VideoQuality.auto();
 
@@ -77,26 +83,38 @@ class NativeEngine implements VideoEngine {
   Stream<VideoQuality> get currentQualityStream => _currentQualityCtrl.stream;
 
   @override
-  Future<void> open(String url) async {
+  Future<void> open(String url, {Map<String, String>? headers}) async {
+    final generation = ++_openGeneration;
     _masterUrl = url;
+    _masterHeaders = Map.unmodifiable(headers ?? const {});
     _qualityUrlById.clear();
     _currentQuality = const VideoQuality.auto();
+    _desiredPlaying = true;
     _qualitiesCtrl.add(const []);
     _currentQualityCtrl.add(const VideoQuality.auto());
 
     // 异步嗅探 HLS 画质列表（不阻塞播放）
-    unawaited(_probeQualities(url));
+    unawaited(_probeQualities(url, generation, _masterHeaders));
 
-    await _openUrl(url);
+    await _openUrl(url, generation: generation, headers: _masterHeaders);
   }
 
   /// 内部：打开指定 URL（切画质时复用），保留当前位置 + 播放状态
-  Future<void> _openUrl(String url, {Duration? resumePosition}) async {
+  Future<void> _openUrl(
+    String url, {
+    required int generation,
+    Map<String, String> headers = const {},
+    Duration? resumePosition,
+  }) async {
     await _disposeController(keepListeners: true);
+    if (_disposed || generation != _openGeneration) return;
     _resetCachedState();
     _bufferingCtrl.add(true);
 
-    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    final controller = VideoPlayerController.networkUrl(
+      Uri.parse(url),
+      httpHeaders: headers,
+    );
     _controller = controller;
     _controllerNotifier.value = controller;
 
@@ -110,7 +128,20 @@ class NativeEngine implements VideoEngine {
         },
       );
     } catch (e) {
-      _errorCtrl.add(e.toString());
+      if (!_disposed &&
+          generation == _openGeneration &&
+          identical(_controller, controller)) {
+        _errorCtrl.add(e.toString());
+      }
+      return;
+    }
+    if (_disposed ||
+        generation != _openGeneration ||
+        !identical(_controller, controller)) {
+      controller.removeListener(_onControllerChanged);
+      try {
+        await controller.dispose();
+      } catch (_) {}
       return;
     }
 
@@ -126,12 +157,21 @@ class NativeEngine implements VideoEngine {
       } catch (_) {}
     }
 
+    try {
+      await controller.setPlaybackSpeed(_playbackRate);
+      await controller.setVolume(_volume);
+    } catch (_) {}
+
     _startPositionTimer();
 
     try {
-      await controller.play();
+      if (_desiredPlaying) {
+        await controller.play();
+      }
     } catch (e) {
-      _errorCtrl.add(e.toString());
+      if (!_disposed && generation == _openGeneration) {
+        _errorCtrl.add(e.toString());
+      }
     }
   }
 
@@ -223,20 +263,33 @@ class NativeEngine implements VideoEngine {
 
   // ── HLS 画质嗅探 ──
 
-  Future<void> _probeQualities(String url) async {
+  Future<void> _probeQualities(
+    String url,
+    int generation,
+    Map<String, String> headers,
+  ) async {
     if (!url.toLowerCase().contains('.m3u8')) return;
     try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 5),
-        receiveTimeout: const Duration(seconds: 5),
-        responseType: ResponseType.plain,
-      ));
-      final resp = await dio.get<String>(url);
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+          responseType: ResponseType.plain,
+        ),
+      );
+      final resp = await dio.get<String>(
+        url,
+        options: Options(headers: headers),
+      );
       final text = resp.data ?? '';
       if (!text.contains('#EXT-X-STREAM-INF')) return;
-      final list = _parseMasterPlaylist(text, url);
-      if (list.length > 1) {
-        _qualitiesCtrl.add(list);
+      final parsed = _parseMasterPlaylist(text, url);
+      if (_disposed || generation != _openGeneration) return;
+      _qualityUrlById
+        ..clear()
+        ..addAll(parsed.urls);
+      if (parsed.qualities.length > 1) {
+        _qualitiesCtrl.add(parsed.qualities);
       }
     } catch (_) {
       // 嗅探失败不影响播放；画质菜单不显示
@@ -244,11 +297,13 @@ class NativeEngine implements VideoEngine {
   }
 
   /// 解析 master playlist：`#EXT-X-STREAM-INF: ...` 下一行为 sub-playlist URL
-  List<VideoQuality> _parseMasterPlaylist(String text, String masterUrl) {
+  ({List<VideoQuality> qualities, Map<String, String> urls})
+  _parseMasterPlaylist(String text, String masterUrl) {
     final resolutionRe = RegExp(r'RESOLUTION=(\d+)x(\d+)');
     final bandwidthRe = RegExp(r'BANDWIDTH=(\d+)');
     final lines = text.split(RegExp(r'\r?\n'));
     final list = <VideoQuality>[];
+    final urls = <String, String>{};
 
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i].trim();
@@ -280,7 +335,7 @@ class NativeEngine implements VideoEngine {
         height: h,
         bitrate: b,
       );
-      _qualityUrlById[quality.id] = absoluteUrl;
+      urls[quality.id] = absoluteUrl;
       list.add(quality);
     }
 
@@ -295,7 +350,7 @@ class NativeEngine implements VideoEngine {
     }
     final dedup = byKey.values.toList();
     dedup.sort((a, b) => (b.height ?? 0).compareTo(a.height ?? 0));
-    return dedup;
+    return (qualities: dedup, urls: urls);
   }
 
   String _resolveUrl(String base, String relative) {
@@ -312,18 +367,26 @@ class NativeEngine implements VideoEngine {
   // ── 动作 ──
 
   @override
-  Future<void> play() async => _controller?.play();
+  Future<void> play() async {
+    _desiredPlaying = true;
+    await _controller?.play();
+  }
 
   @override
-  Future<void> pause() async => _controller?.pause();
+  Future<void> pause() async {
+    _desiredPlaying = false;
+    await _controller?.pause();
+  }
 
   @override
   Future<void> playOrPause() async {
     final c = _controller;
     if (c == null) return;
     if (c.value.isPlaying) {
+      _desiredPlaying = false;
       await c.pause();
     } else {
+      _desiredPlaying = true;
       await c.play();
     }
   }
@@ -335,12 +398,14 @@ class NativeEngine implements VideoEngine {
   Future<void> setRate(double rate) async {
     // AVPlayer 支持 0.5~2.0；超出会 throw，clamp 保护
     final clamped = rate.clamp(0.5, 2.0);
+    _playbackRate = clamped;
     await _controller?.setPlaybackSpeed(clamped);
   }
 
   @override
   Future<void> setVolume(double v01) async {
-    await _controller?.setVolume(v01.clamp(0.0, 1.0));
+    _volume = v01.clamp(0.0, 1.0);
+    await _controller?.setVolume(_volume);
   }
 
   @override
@@ -356,7 +421,13 @@ class NativeEngine implements VideoEngine {
     _currentQuality = q;
     _currentQualityCtrl.add(q);
 
-    await _openUrl(targetUrl, resumePosition: pos);
+    final generation = ++_openGeneration;
+    await _openUrl(
+      targetUrl,
+      generation: generation,
+      headers: _masterHeaders,
+      resumePosition: pos,
+    );
   }
 
   @override
@@ -387,6 +458,8 @@ class NativeEngine implements VideoEngine {
 
   @override
   Future<void> dispose() async {
+    _disposed = true;
+    _openGeneration++;
     await _disposeController();
     _controllerNotifier.dispose();
     await _positionCtrl.close();

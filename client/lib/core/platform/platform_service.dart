@@ -4,13 +4,13 @@ import 'package:flutter/services.dart';
 /// 应用运行平台
 enum AppPlatform {
   androidTv, // Android TV 盒子，遥控器操作
-  windows,   // Windows 桌面，鼠标+键盘
-  mobile,    // Android / iOS 手机，触摸操作（v2.0）
+  windows, // Windows 桌面，鼠标+键盘
+  mobile, // Android / iOS 手机，触摸操作（v2.0）
 }
 
 /// 输入方式
 enum InputType {
-  dpad,  // 遥控器方向键（TV）
+  dpad, // 遥控器方向键（TV）
   mouse, // 鼠标（Windows）
   touch, // 触摸（手机，v2.0）
 }
@@ -36,6 +36,17 @@ class PlatformService {
     }
   }
 
+  /// Android TV ROM 对普通 WakeLock 支持不一，播放页额外使用窗口 flag；
+  /// 非 Android 平台与原生通道异常均静默忽略。
+  static Future<void> setKeepScreenOn(bool enabled) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('setKeepScreenOn', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
+
   static AppPlatform get current {
     if (Platform.isAndroid) {
       return _isAndroidTvCached ? AppPlatform.androidTv : AppPlatform.mobile;
@@ -49,8 +60,8 @@ class PlatformService {
 
   static InputType get inputType => switch (current) {
     AppPlatform.androidTv => InputType.dpad,
-    AppPlatform.windows   => InputType.mouse,
-    AppPlatform.mobile    => InputType.touch,
+    AppPlatform.windows => InputType.mouse,
+    AppPlatform.mobile => InputType.touch,
   };
 
   static bool get isTv => current == AppPlatform.androidTv;

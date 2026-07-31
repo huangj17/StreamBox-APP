@@ -7,7 +7,12 @@ import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.net.URLClassLoader
+import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 @Serializable
 data class PluginInfo(
@@ -50,26 +55,53 @@ class SpiderManager(private val config: BridgeConfig) {
             this::class.java.classLoader
         )
 
-        val clazz = classLoader.loadClass(plugin.className)
-        val spider = clazz.getDeclaredConstructor().newInstance()
+        try {
+            val clazz = classLoader.loadClass(plugin.className)
+            val spider = clazz.getDeclaredConstructor().newInstance()
 
-        // 反射调用 init(Context, String) 或 init(Object, String)
-        val context = MockContext(plugin.key)
-        val initMethod = try {
-            clazz.getMethod("init", android.content.Context::class.java, String::class.java)
-        } catch (_: NoSuchMethodException) {
-            clazz.getMethod("init", Any::class.java, String::class.java)
+            // init 也必须有超时；否则一个恶意/损坏插件会卡死整个 Bridge 启动。
+            val context = MockContext(plugin.key)
+            val initMethod = try {
+                clazz.getMethod("init", android.content.Context::class.java, String::class.java)
+            } catch (_: NoSuchMethodException) {
+                clazz.getMethod("init", Any::class.java, String::class.java)
+            }
+            val initExecutor = Executors.newSingleThreadExecutor { runnable ->
+                Thread(runnable, "spider-init-${plugin.key}").apply { isDaemon = true }
+            }
+            try {
+                val future = initExecutor.submit(Callable {
+                    initMethod.invoke(spider, context, plugin.ext)
+                })
+                try {
+                    future.get(config.timeout, TimeUnit.MILLISECONDS)
+                } catch (e: TimeoutException) {
+                    future.cancel(true)
+                    throw SpiderTimeoutException(
+                        "Plugin '${plugin.key}' init timed out after ${config.timeout}ms"
+                    )
+                } catch (e: ExecutionException) {
+                    throw (e.cause ?: e)
+                }
+            } finally {
+                initExecutor.shutdownNow()
+            }
+
+            spiders[plugin.key] = SpiderWrapper(
+                key = plugin.key,
+                name = plugin.name,
+                instance = spider,
+                clazz = clazz,
+                classLoader = classLoader,
+                timeoutMs = config.timeout,
+            )
+        } catch (e: Throwable) {
+            try {
+                classLoader.close()
+            } catch (_: Exception) {
+            }
+            throw e
         }
-        initMethod.invoke(spider, context, plugin.ext)
-
-        spiders[plugin.key] = SpiderWrapper(
-            key = plugin.key,
-            name = plugin.name,
-            instance = spider,
-            clazz = clazz,
-            classLoader = classLoader,
-            timeoutMs = config.timeout,
-        )
     }
 
     fun get(key: String): SpiderWrapper? = spiders[key]

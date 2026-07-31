@@ -8,6 +8,7 @@ class CmsVideoDetail {
   final String vodContent;
   final String vodPlayFrom;
   final String vodPlayUrl;
+  final String vodPlayParse;
   final String? vodYear;
   final String? vodClass;
   final String? vodRemarks;
@@ -25,6 +26,7 @@ class CmsVideoDetail {
     required this.vodContent,
     required this.vodPlayFrom,
     required this.vodPlayUrl,
+    this.vodPlayParse = '',
     this.vodYear,
     this.vodClass,
     this.vodRemarks,
@@ -38,12 +40,15 @@ class CmsVideoDetail {
 
   factory CmsVideoDetail.fromJson(Map<String, dynamic> json) {
     return CmsVideoDetail(
-      vodId: json['vod_id'] is int ? json['vod_id'] as int : int.tryParse(json['vod_id'].toString()) ?? 0,
+      vodId: json['vod_id'] is int
+          ? json['vod_id'] as int
+          : int.tryParse(json['vod_id'].toString()) ?? 0,
       vodName: json['vod_name'] as String? ?? '',
       vodPic: VideoItem.fixCoverUrl(json['vod_pic'] as String? ?? ''),
       vodContent: _stripHtml(json['vod_content'] as String? ?? ''),
       vodPlayFrom: json['vod_play_from'] as String? ?? '',
       vodPlayUrl: json['vod_play_url'] as String? ?? '',
+      vodPlayParse: json['parse']?.toString() ?? '',
       vodYear: json['vod_year'] as String?,
       vodClass: json['vod_class'] as String?,
       vodRemarks: json['vod_remarks'] as String?,
@@ -88,15 +93,33 @@ class CmsVideoDetail {
   List<List<Episode>> get _rawEpisodeGroups {
     if (vodPlayUrl.isEmpty) return [];
     final sources = vodPlayUrl.split(r'$$$');
-    return sources.map((source) {
+    final flags = _rawSourceNames;
+    final parseFlags = vodPlayParse.split(r'$$$');
+    return sources.asMap().entries.map((entry) {
+      final sourceIndex = entry.key;
+      final source = entry.value;
+      final sourceFlag = sourceIndex < flags.length ? flags[sourceIndex] : '';
+      final parseFlag = parseFlags.length == 1
+          ? parseFlags.first
+          : sourceIndex < parseFlags.length
+          ? parseFlags[sourceIndex]
+          : '';
+      final requiresResolve = parseFlag.trim() == '1';
       return source.split('#').where((ep) => ep.isNotEmpty).map((ep) {
         final dollarIndex = ep.indexOf(r'$');
         if (dollarIndex == -1) {
-          return Episode(name: ep, url: '');
+          return Episode(
+            name: ep,
+            url: '',
+            sourceFlag: sourceFlag,
+            requiresResolve: requiresResolve,
+          );
         }
         return Episode(
           name: ep.substring(0, dollarIndex),
           url: ep.substring(dollarIndex + 1),
+          sourceFlag: sourceFlag,
+          requiresResolve: requiresResolve,
         );
       }).toList();
     }).toList();
