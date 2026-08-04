@@ -79,15 +79,14 @@ final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
       ? await _preferLocalBridge(raw, ref.read(dioProvider))
       : raw;
 
-  // JAR Bridge URL → 通过 /api/list 发现插件
-  if (SourceParser.isJarBridgeUrl(url)) {
-    return parser.parseJarBridge(url);
-  }
-
   // 直接 CMS API URL → 包装为单站点
   if (SourceParser.isCmsApiUrl(url)) {
     return SourceParser.wrapCmsUrl(url);
   }
+
+  // 任意域名、端口或 HTTPS Gateway 均通过短超时 Schema 探测识别。
+  final gateway = await parser.probeGateway(url);
+  if (gateway != null) return gateway;
 
   // 检查是否多仓
   final warehouses = await ref.watch(warehouseListProvider.future);

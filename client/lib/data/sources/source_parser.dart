@@ -48,10 +48,12 @@ class SourceParser {
       return urls
           .whereType<Map<String, dynamic>>()
           .where((e) => e['url'] != null)
-          .map((e) => Warehouse(
-                name: (e['name'] as String?) ?? '',
-                url: e['url'] as String,
-              ))
+          .map(
+            (e) => Warehouse(
+              name: (e['name'] as String?) ?? '',
+              url: e['url'] as String,
+            ),
+          )
           .toList();
     }
 
@@ -61,10 +63,12 @@ class SourceParser {
       return storeHouse
           .whereType<Map<String, dynamic>>()
           .where((e) => e['sourceUrl'] != null)
-          .map((e) => Warehouse(
-                name: (e['sourceName'] as String?) ?? '',
-                url: e['sourceUrl'] as String,
-              ))
+          .map(
+            (e) => Warehouse(
+              name: (e['sourceName'] as String?) ?? '',
+              url: e['sourceUrl'] as String,
+            ),
+          )
           .toList();
     }
 
@@ -94,35 +98,111 @@ class SourceParser {
 
   /// 解析 JAR Bridge 服务，通过 /api/list 发现所有可用插件
   Future<SourceConfig> parseJarBridge(String bridgeUrl) async {
-    final baseUrl = bridgeUrl.endsWith('/') ? bridgeUrl.substring(0, bridgeUrl.length - 1) : bridgeUrl;
-    final response = await _dio.get(
-      '$baseUrl/api/list',
-      options: Options(
-        responseType: ResponseType.plain,
-        receiveTimeout: const Duration(seconds: 10),
-      ),
-    );
-
-    final data = jsonDecode(response.data as String) as Map<String, dynamic>;
-    final sources = data['sources'] as List<dynamic>? ?? [];
-
-    final sites = sources.map((s) {
-      final map = s as Map<String, dynamic>;
-      return Site.fromBridge(
-        bridgeUrl: baseUrl,
-        key: map['key'] as String,
-        name: map['name'] as String,
-        apiPath: map['api'] as String,
-      );
-    }).toList();
-
-    return SourceConfig(sites: sites);
+    final config = await probeGateway(bridgeUrl);
+    if (config == null) {
+      throw const FormatException('URL 未返回有效的 StreamBox Gateway Schema');
+    }
+    return config;
   }
+
+  /// 短超时探测 StreamBox Gateway。仅 HTTP 200 不足以通过，必须具备
+  /// `code=200` 与结构合法的 `sources` 数组。
+  Future<SourceConfig?> probeGateway(String gatewayUrl) async {
+    final baseUrl = gatewayUrl.endsWith('/')
+        ? gatewayUrl.substring(0, gatewayUrl.length - 1)
+        : gatewayUrl;
+    final baseUri = Uri.tryParse(baseUrl);
+    if (baseUri == null || !baseUri.hasScheme || !baseUri.hasAuthority) {
+      return null;
+    }
+    try {
+      final response = await _dio.get(
+        '$baseUrl/api/list',
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 2),
+          receiveTimeout: const Duration(seconds: 2),
+        ),
+      );
+      final decoded = jsonDecode(response.data as String);
+      if (decoded is! Map<String, dynamic> || decoded['code'] != 200) {
+        return null;
+      }
+      final rawSources = decoded['sources'];
+      if (rawSources is! List<dynamic>) return null;
+
+      final sites = <Site>[];
+      for (final raw in rawSources) {
+        if (raw is! Map<String, dynamic>) return null;
+        final key = raw['key'];
+        final name = raw['name'];
+        final api = raw['api'];
+        if (key is! String ||
+            key.isEmpty ||
+            name is! String ||
+            api is! String ||
+            api.isEmpty) {
+          return null;
+        }
+        final status = _gatewayStatus(raw['status']);
+        if (status != GatewaySourceStatus.ready &&
+            status != GatewaySourceStatus.degraded) {
+          continue;
+        }
+        final kind = _gatewayKind(raw['kind']);
+        final site = Site.fromGateway(
+          gatewayUrl: baseUrl,
+          key: key,
+          name: name,
+          apiPath: api,
+          kind: kind,
+          status: status,
+          searchable: _boolLike(raw['searchable'], defaultValue: true),
+        );
+        final resolved = Uri.tryParse(site.api);
+        if (resolved == null ||
+            resolved.scheme != baseUri.scheme ||
+            resolved.host != baseUri.host ||
+            resolved.port != baseUri.port) {
+          return null;
+        }
+        sites.add(site);
+      }
+      return SourceConfig(sites: sites);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static SiteSourceKind _gatewayKind(Object? value) =>
+      switch (value?.toString().toLowerCase()) {
+        'cms' => SiteSourceKind.cms,
+        'manual' => SiteSourceKind.manual,
+        'jar' || null || '' => SiteSourceKind.jar,
+        _ => SiteSourceKind.unknown,
+      };
+
+  static GatewaySourceStatus _gatewayStatus(Object? value) =>
+      switch (value?.toString().toLowerCase()) {
+        'degraded' => GatewaySourceStatus.degraded,
+        'failed' => GatewaySourceStatus.failed,
+        'ready' || null || '' => GatewaySourceStatus.ready,
+        _ => GatewaySourceStatus.unknown,
+      };
+
+  static bool _boolLike(Object? value, {required bool defaultValue}) =>
+      switch (value) {
+        final bool flag => flag,
+        final num number => number != 0,
+        final String text when text == '1' || text.toLowerCase() == 'true' =>
+          true,
+        final String text when text == '0' || text.toLowerCase() == 'false' =>
+          false,
+        _ => defaultValue,
+      };
 
   /// 将普通 CMS API URL 包装为 SourceConfig
   static SourceConfig wrapCmsUrl(String url) {
-    return SourceConfig(
-      sites: [Site.fromUrl(url)],
-    );
+    return SourceConfig(sites: [Site.fromUrl(url)]);
   }
 }

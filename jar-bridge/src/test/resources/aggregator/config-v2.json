@@ -1,0 +1,44 @@
+{
+  "spider": "./artifacts/global.jar;md5;0123456789abcdef0123456789abcdef",
+  "sites": [
+    {
+      "key": "cms_relative",
+      "name": "Relative CMS",
+      "type": 1,
+      "api": "./cms/api.php",
+      "searchable": "1",
+      "quickSearch": false,
+      "filterable": true,
+      "unknownSiteField": "ignored"
+    },
+    {
+      "key": "http_type3",
+      "type": "3",
+      "api": "https://cms.example/api.php",
+      "searchable": true
+    },
+    {
+      "key": "global_jar",
+      "name": "Global Jar",
+      "type": 3,
+      "api": "csp_Global",
+      "ext": {
+        "z": 2,
+        "a": 1
+      }
+    },
+    {
+      "key": "site_jar",
+      "name": "Site Jar",
+      "type": 3,
+      "api": "com.example.SiteSpider",
+      "jar": "./artifacts/site.jar",
+      "ext": "site-secret"
+    }
+  ],
+  "lives": [],
+  "parses": [],
+  "unknownTopLevelField": {
+    "ignored": true
+  }
+}

@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.streambox"
-version = "1.0.0"
+version = "2.0.0"
 
 application {
     mainClass.set("com.streambox.bridge.ApplicationKt")
@@ -20,6 +20,7 @@ repositories {
 }
 
 val ktorVersion = "3.2.0"
+val coroutinesVersion = "1.10.2"
 
 dependencies {
     // Ktor Server
@@ -29,6 +30,9 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-swagger:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
+
+    // Explicitly pinned because catalog/sync lifecycles use coroutines directly.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
 
     // JSON
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")

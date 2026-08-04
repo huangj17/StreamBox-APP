@@ -1,12 +1,28 @@
 services:
-  jar-bridge:
+  aggregator:
+    image: ${AGGREGATOR_IMAGE:?Set AGGREGATOR_IMAGE to a reviewed immutable image reference}
+    expose:
+      - "5678"
+    volumes:
+      - aggregator-data:/app/data
+    networks:
+      - streambox-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5678/ || curl -fsS http://127.0.0.1:5678/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  gateway:
     build: .
     ports:
       - "9978:9978"
     volumes:
       - ./plugins:/app/plugins:ro
-      - ./config.yml:/app/config.yml:ro
-      - ./data:/app/data
+      - ./config.compose.yml:/app/config.yml:ro
+      - gateway-data:/app/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -19,5 +35,20 @@ services:
     cpus: 2.0
     init: true
     environment:
-      - JAVA_OPTS=-Xmx256m
+      AGGREGATOR_TOKEN: ${AGGREGATOR_TOKEN:-}
+      BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:-}
+      BRIDGE_SECRET_KEY: ${BRIDGE_SECRET_KEY:-}
+    depends_on:
+      aggregator:
+        condition: service_healthy
+    networks:
+      - streambox-internal
     restart: unless-stopped
+
+networks:
+  streambox-internal:
+    internal: false
+
+volumes:
+  aggregator-data:
+  gateway-data:

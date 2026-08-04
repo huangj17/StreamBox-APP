@@ -7,15 +7,18 @@ import java.util.concurrent.ConcurrentHashMap
  * 模拟 Android Context。
  * 仅实现 Spider 插件实际调用的方法。
  */
-class MockContext(private val pluginKey: String) : android.content.Context() {
+class MockContext(
+    private val pluginKey: String,
+    private val runtimeRoot: File = File("data"),
+) : android.content.Context() {
 
     private val prefsMap = ConcurrentHashMap<String, MockSharedPreferences>()
-    private val cacheDir = File("data/$pluginKey/cache").apply { mkdirs() }
-    private val filesDir = File("data/$pluginKey/files").apply { mkdirs() }
+    private val cacheDir = File(runtimeRoot, "$pluginKey/cache").apply { mkdirs() }
+    private val filesDir = File(runtimeRoot, "$pluginKey/files").apply { mkdirs() }
 
     fun getSharedPreferences(name: String, @Suppress("UNUSED_PARAMETER") mode: Int): MockSharedPreferences {
         return prefsMap.getOrPut(name) {
-            MockSharedPreferences(File("data/$pluginKey/prefs/$name.json"))
+            MockSharedPreferences(File(runtimeRoot, "$pluginKey/prefs/$name.json"))
         }
     }
 

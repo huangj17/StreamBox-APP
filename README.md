@@ -15,20 +15,23 @@ Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。本�
 | 目录          | 说明                                  | 技术栈                              | README                                       |
 | ------------- | ------------------------------------- | ----------------------------------- | -------------------------------------------- |
 | `client/`     | Flutter 客户端（主应用）              | Flutter/Dart + Riverpod + media_kit | [client/README.md](client/README.md)         |
-| `jar-bridge/` | JAR Bridge 中间服务（JAR 插件运行时） | Kotlin + Ktor + Gradle              | [jar-bridge/README.md](jar-bridge/README.md) |
+| `jar-bridge/` | StreamBox Gateway（CMS + JAR 运行时） | Kotlin + Ktor + Gradle              | [jar-bridge/README.md](jar-bridge/README.md) |
 
 ## 架构关系
 
 ```
-StreamBox (Flutter)  --HTTP-->  JAR Bridge (JVM)  --Spider-->  内容站点
-                                    |
-                                    v
-                              plugins/ 目录下的 .jar 文件
+TVBox Source Aggregator --HTTP--┐
+                               v
+StreamBox (Flutter) --HTTP--> StreamBox Gateway --CMS/Spider--> 内容站点
+                               |
+                               v
+                         data/ + plugins/*.jar
 ```
 
-- 客户端通过 HTTP 连接 Bridge，Bridge 对客户端来说就是一个普通的 CMS 源
-- 每个 JAR 源的 API 格式与苹果 CMS 完全兼容（`ac=class`、`ac=detail`、`wd=` 等）
-- Bridge 是可选组件，StreamBox 在没有 Bridge 时仍可正常使用 CMS 源
+- 客户端只需配置 Gateway 地址，通过 `/api/list` 发现 CMS、自动 JAR 和手工 JAR
+- Gateway 与 Aggregator 独立部署，Aggregator 仅提供配置，不执行 Spider
+- 每个 source 的 API 格式与苹果 CMS 完全兼容（`ac=class`、`ac=detail`、`wd=` 等）
+- Gateway 是可选组件，StreamBox 在没有 Gateway 时仍可直接使用 CMS 源
 - 客户端默认连接 `http://localhost:9978`
 
 ## 快速开始

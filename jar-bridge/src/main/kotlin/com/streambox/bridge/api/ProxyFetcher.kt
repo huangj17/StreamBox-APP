@@ -10,10 +10,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import com.streambox.bridge.security.isPublicRemoteAddress
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.net.Inet4Address
-import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.security.MessageDigest
@@ -156,44 +155,7 @@ private fun validateProxyUrl(rawUrl: String): HttpUrl {
 }
 
 internal fun isPublicAddress(address: InetAddress): Boolean {
-    if (
-        address.isAnyLocalAddress ||
-        address.isLoopbackAddress ||
-        address.isLinkLocalAddress ||
-        address.isSiteLocalAddress ||
-        address.isMulticastAddress
-    ) {
-        return false
-    }
-
-    val bytes = address.address.map(Byte::toInt).map { it and 0xff }
-    return when (address) {
-        is Inet4Address -> {
-            val first = bytes[0]
-            val second = bytes[1]
-            when {
-                first == 0 -> false
-                first == 100 && second in 64..127 -> false // CGNAT 100.64/10
-                first == 192 && second == 0 && bytes[2] in setOf(0, 2) -> false
-                first == 192 && second == 88 && bytes[2] == 99 -> false
-                first == 198 && second in 18..19 -> false
-                first == 198 && second == 51 && bytes[2] == 100 -> false
-                first == 203 && second == 0 && bytes[2] == 113 -> false
-                first >= 224 -> false
-                else -> true
-            }
-        }
-
-        is Inet6Address -> {
-            val globalUnicast = bytes[0] in 0x20..0x3f // 2000::/3
-            val uniqueLocal = bytes[0] and 0xfe == 0xfc
-            val documentation =
-                bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8
-            globalUnicast && !uniqueLocal && !documentation
-        }
-
-        else -> false
-    }
+    return isPublicRemoteAddress(address)
 }
 
 private fun readBoundedImage(response: Response): ProxyPayload {

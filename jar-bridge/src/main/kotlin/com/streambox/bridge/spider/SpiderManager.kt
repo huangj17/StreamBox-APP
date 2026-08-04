@@ -1,11 +1,15 @@
 package com.streambox.bridge.spider
 
+import com.streambox.bridge.catalog.CatalogError
+import com.streambox.bridge.catalog.CatalogErrorCode
+import com.streambox.bridge.catalog.ManualCatalogSource
 import com.streambox.bridge.config.BridgeConfig
 import com.streambox.bridge.config.PluginConfig
 import com.streambox.bridge.host.MockContext
+import com.streambox.bridge.security.LocalJarPolicy
 import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
-import java.io.File
+import java.nio.file.Path
 import java.net.URLClassLoader
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
@@ -47,8 +51,7 @@ class SpiderManager(private val config: BridgeConfig) {
     }
 
     private fun load(plugin: PluginConfig) {
-        val jarFile = File(plugin.jar)
-        require(jarFile.exists()) { "JAR not found: ${plugin.jar}" }
+        val jarFile = LocalJarPolicy.resolve(Path.of(plugin.jar)).toFile()
 
         val classLoader = URLClassLoader(
             arrayOf(jarFile.toURI().toURL()),
@@ -117,6 +120,23 @@ class SpiderManager(private val config: BridgeConfig) {
     fun getLoadTime(key: String): Long? = loadTimes[key]
     fun getFailedReason(key: String): String? = failedPlugins[key]
     fun allKeys(): Set<String> = spiders.keys + failedPlugins.keys
+
+    fun manualCatalogSources(): List<ManualCatalogSource> = config.plugins.map { plugin ->
+        val runtime = spiders[plugin.key]
+        val failure = if (runtime == null) {
+            CatalogError(
+                code = CatalogErrorCode.SOURCE_UNAVAILABLE,
+                message = failedPlugins[plugin.key] ?: "plugin has not been loaded",
+            )
+        } else {
+            null
+        }
+        ManualCatalogSource(
+            plugin = plugin,
+            runtime = runtime,
+            failure = failure,
+        )
+    }
 
     fun shutdown() {
         spiders.values.forEach { it.close() }

@@ -1,10 +1,10 @@
 package com.streambox.bridge.spider
 
+import com.streambox.bridge.catalog.SpiderRuntime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
 import org.slf4j.LoggerFactory
-import java.net.URLClassLoader
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.HashMap
 import java.util.concurrent.Callable
@@ -22,17 +22,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 使用单线程 Executor 串行化调用，带超时保护。
  */
 class SpiderWrapper(
-    val key: String,
-    val name: String,
+    override val key: String,
+    override val name: String,
     private val instance: Any,
     private val clazz: Class<*>,
-    private val classLoader: URLClassLoader,
+    private val classLoader: AutoCloseable,
     private val timeoutMs: Long = 15_000,
-) : AutoCloseable {
+) : SpiderRuntime {
 
     private val logger = LoggerFactory.getLogger("SpiderWrapper[$key]")
 
     private val unavailable = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
     private val pendingFutures = ConcurrentHashMap.newKeySet<Future<*>>()
     private val executor = ThreadPoolExecutor(
         1,
@@ -97,7 +98,7 @@ class SpiderWrapper(
         }
     }
 
-    suspend fun homeContent(filter: Boolean): Result<String> = invoke("homeContent") {
+    override suspend fun homeContent(filter: Boolean): Result<String> = invoke("homeContent") {
         val m = clazz.getMethod("homeContent", Boolean::class.javaPrimitiveType)
         m.invoke(instance, filter) as? String ?: "{}"
     }
@@ -107,9 +108,9 @@ class SpiderWrapper(
         m.invoke(instance) as? String ?: "{\"list\":[]}"
     }
 
-    suspend fun categoryContent(
+    override suspend fun categoryContent(
         tid: String,
-        pg: String,
+        page: String,
         filter: Boolean,
         extend: HashMap<String, String>,
     ): Result<String> = invoke("categoryContent") {
@@ -118,15 +119,15 @@ class SpiderWrapper(
             String::class.java, String::class.java,
             Boolean::class.javaPrimitiveType, HashMap::class.java
         )
-        m.invoke(instance, tid, pg, filter, extend) as? String ?: "{}"
+        m.invoke(instance, tid, page, filter, extend) as? String ?: "{}"
     }
 
-    suspend fun detailContent(ids: List<String>): Result<String> = invoke("detailContent") {
+    override suspend fun detailContent(ids: List<String>): Result<String> = invoke("detailContent") {
         val m = clazz.getMethod("detailContent", List::class.java)
         m.invoke(instance, ids) as? String ?: "{}"
     }
 
-    suspend fun playerContent(flag: String, id: String, vipFlags: List<String>): Result<String> =
+    override suspend fun playerContent(flag: String, id: String, vipFlags: List<String>): Result<String> =
         invoke("playerContent") {
             val m = clazz.getMethod(
                 "playerContent",
@@ -135,12 +136,13 @@ class SpiderWrapper(
             m.invoke(instance, flag, id, vipFlags) as? String ?: "{}"
         }
 
-    suspend fun searchContent(key: String, quick: Boolean): Result<String> = invoke("searchContent") {
+    override suspend fun searchContent(keyword: String, quick: Boolean): Result<String> = invoke("searchContent") {
         val m = clazz.getMethod("searchContent", String::class.java, Boolean::class.javaPrimitiveType)
-        m.invoke(instance, key, quick) as? String ?: "{\"list\":[]}"
+        m.invoke(instance, keyword, quick) as? String ?: "{\"list\":[]}"
     }
 
     override fun close() {
+        if (!closed.compareAndSet(false, true)) return
         markUnavailable()
         try {
             classLoader.close()
