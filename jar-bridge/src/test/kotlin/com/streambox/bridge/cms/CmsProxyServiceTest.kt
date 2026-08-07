@@ -82,4 +82,27 @@ class CmsProxyServiceTest {
             assertEquals("REMOTE_TARGET_FORBIDDEN", error.code)
         }
     }
+
+    @Test
+    fun `cms response is rejected when it exceeds the configured limit`() = runBlocking {
+        server.createContext("/api.php") { exchange ->
+            val bytes = "{\"value\":\"${"x".repeat(128)}\"}".toByteArray(StandardCharsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        val target = "http://127.0.0.1:${server.address.port}/api.php".toHttpUrl()
+
+        CmsProxyService(maxResponseBytes = 64).use { service ->
+            val error = assertFailsWith<CmsProxyException> {
+                service.execute(
+                    handler = SourceHandler.Cms(target),
+                    catalogVersion = "v1",
+                    entryKey = "cms",
+                    query = listOf("ac" to "class"),
+                )
+            }
+            assertEquals("UPSTREAM_RESPONSE_TOO_LARGE", error.code)
+        }
+    }
 }

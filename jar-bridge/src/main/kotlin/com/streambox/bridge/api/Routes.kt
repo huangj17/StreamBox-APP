@@ -4,6 +4,9 @@ import com.streambox.bridge.catalog.CatalogManager
 import com.streambox.bridge.catalog.SourceHandler
 import com.streambox.bridge.cms.CmsProxyException
 import com.streambox.bridge.cms.CmsProxyService
+import com.streambox.bridge.config.BridgeConfig
+import com.streambox.bridge.security.GatewayDenial
+import com.streambox.bridge.security.GatewayRequestGuard
 import com.streambox.bridge.spider.SpiderManager
 import com.streambox.bridge.spider.SpiderTimeoutException
 import com.streambox.bridge.spider.SpiderUnavailableException
@@ -50,14 +53,26 @@ data class ApiListResponse(
 fun Application.configureRoutes(
     manager: SpiderManager,
     catalogManager: CatalogManager,
+    config: BridgeConfig,
     cmsProxyService: CmsProxyService = CmsProxyService(),
 ) {
     startTime = System.currentTimeMillis()
     monitor.subscribe(ApplicationStopped) { cmsProxyService.close() }
 
+    val requestGuard = GatewayRequestGuard(config.security)
+    val publicBaseUrl = config.server.publicBaseUrl.trimEnd('/')
+    val maxResponseBytes = config.security.maxResponseBytes
+
     routing {
+        // 容器编排只需要最小存活信号；不暴露插件加载错误和运行时细节。
+        get("/health/live") {
+            call.respondText("{\"status\":\"ok\"}", ContentType.Application.Json)
+        }
+
         // 插件列表
         get("/api/list") {
+            val permit = call.acquireGatewayPermit(requestGuard, config) ?: return@get
+            try {
             val sources = catalogManager.listPublic().map { entry ->
                 ApiSource(
                     key = entry.spec.key,
@@ -79,10 +94,15 @@ fun Application.configureRoutes(
                 ),
                 ContentType.Application.Json
             )
+            } finally {
+                permit.close()
+            }
         }
 
         // 健康检查
         get("/health") {
+            val permit = call.acquireGatewayPermit(requestGuard, config) ?: return@get
+            try {
             val hasEntries = catalogManager.listPublic().isNotEmpty()
             val health = if (hasEntries) "ok" else "error"
             call.respondText(
@@ -90,18 +110,28 @@ fun Application.configureRoutes(
                 ContentType.Application.Json,
                 if (health == "error") HttpStatusCode.ServiceUnavailable else HttpStatusCode.OK,
             )
+            } finally {
+                permit.close()
+            }
         }
 
         // 核心 API：CMS 兼容格式
         get("/api/{key}") {
+            val permit = call.acquireGatewayPermit(requestGuard, config) ?: return@get
             val key = call.parameters["key"]
-                ?: return@get call.respondError(400, "Missing plugin key")
+                ?: run {
+                    permit.close()
+                    return@get call.respondError(400, "Missing plugin key")
+                }
             val lease = catalogManager.acquire(key)
-                ?: return@get call.respondApiError(
-                    HttpStatusCode.NotFound,
-                    "SOURCE_NOT_FOUND",
-                    "Source not found",
-                )
+                ?: run {
+                    permit.close()
+                    return@get call.respondApiError(
+                        HttpStatusCode.NotFound,
+                        "SOURCE_NOT_FOUND",
+                        "Source not found",
+                    )
+                }
             try {
                 val ac = call.request.queryParameters["ac"]
                 val t = call.request.queryParameters["t"]
@@ -132,7 +162,7 @@ fun Application.configureRoutes(
 
                 // 命中缓存：跳过 spider 调用，直接进 respondResult 走 sanitize
                 cacheKey?.let { ResponseCache.get(it) }?.let { cached ->
-                    call.respondResult(Result.success(cached))
+                    call.respondResult(Result.success(cached), publicBaseUrl, maxResponseBytes)
                     return@get
                 }
 
@@ -166,23 +196,34 @@ fun Application.configureRoutes(
                 // 下次命中也会被 502，60s 后过期，acceptable）
                 if (cacheKey != null) {
                     result.onSuccess { jsonStr ->
-                        if (jsonStr.isNotBlank()) ResponseCache.put(cacheKey, jsonStr)
+                        if (jsonStr.isNotBlank() && jsonStr.length <= maxResponseBytes) {
+                            ResponseCache.put(cacheKey, jsonStr)
+                        }
                     }
                 }
 
-                call.respondResult(result)
+                call.respondResult(result, publicBaseUrl, maxResponseBytes)
             } finally {
                 lease.close()
+                permit.close()
             }
         }
 
         // 图片代理（处理需要特定 header 的图片 URL）
         get("/proxy") {
+            // URL 自带进程级 HMAC capability；图片加载器无法附加 Gateway Bearer Token。
+            val permit = call.acquireGatewayPermit(
+                requestGuard,
+                config,
+                authenticationRequired = false,
+            ) ?: return@get
+            try {
             val encodedUrl = call.request.queryParameters["url"]
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
             val encodedHeader = call.request.queryParameters["header"]
+            val expiresAt = call.request.queryParameters["exp"]?.toLongOrNull()
             val signature = call.request.queryParameters["sig"]
-            if (!isAuthorizedProxyRequest(encodedUrl, encodedHeader, signature)) {
+            if (!isAuthorizedProxyRequest(encodedUrl, encodedHeader, expiresAt, signature)) {
                 return@get call.respondError(403, "Invalid or missing proxy signature")
             }
 
@@ -216,18 +257,28 @@ fun Application.configureRoutes(
                 routeLogger.warn("Proxy request failed: {}", e.message)
                 call.respondError(502, "Proxy upstream request failed")
             }
+            } finally {
+                permit.close()
+            }
         }
 
         // 播放地址二次解析
         get("/api/{key}/play") {
+            val permit = call.acquireGatewayPermit(requestGuard, config) ?: return@get
             val key = call.parameters["key"]
-                ?: return@get call.respondError(400, "Missing plugin key")
+                ?: run {
+                    permit.close()
+                    return@get call.respondError(400, "Missing plugin key")
+                }
             val lease = catalogManager.acquire(key)
-                ?: return@get call.respondApiError(
-                    HttpStatusCode.NotFound,
-                    "SOURCE_NOT_FOUND",
-                    "Source not found",
-                )
+                ?: run {
+                    permit.close()
+                    return@get call.respondApiError(
+                        HttpStatusCode.NotFound,
+                        "SOURCE_NOT_FOUND",
+                        "Source not found",
+                    )
+                }
             try {
                 val flag = call.request.queryParameters["flag"] ?: ""
                 val id = call.request.queryParameters["id"]
@@ -242,6 +293,8 @@ fun Application.configureRoutes(
                     is SourceHandler.Spider ->
                         call.respondSpiderPlayResult(
                             handler.runtime.playerContent(flag, id, emptyList()),
+                            publicBaseUrl,
+                            maxResponseBytes,
                         )
                     is SourceHandler.Cms -> {
                         if (id.toHttpUrlOrNull() == null) {
@@ -261,6 +314,7 @@ fun Application.configureRoutes(
                 }
             } finally {
                 lease.close()
+                permit.close()
             }
         }
     }
@@ -273,20 +327,24 @@ private data class CmsPlayResponse(
     val header: Map<String, String>,
 )
 
-private suspend fun ApplicationCall.respondResult(result: Result<String>) {
+private suspend fun ApplicationCall.respondResult(
+    result: Result<String>,
+    publicBaseUrl: String,
+    maxResponseBytes: Long,
+) {
     result.fold(
         onSuccess = { jsonStr ->
             // 校验返回的 JSON 是否合法
-            if (jsonStr.isBlank() || (!jsonStr.trimStart().startsWith("{") && !jsonStr.trimStart().startsWith("["))) {
+            if (jsonStr.length > maxResponseBytes) {
+                respondError(502, "Plugin response exceeds configured size limit")
+            } else if (jsonStr.isBlank() || (!jsonStr.trimStart().startsWith("{") && !jsonStr.trimStart().startsWith("["))) {
                 respondError(502, "Invalid response from plugin")
             } else {
                 try {
                     Json.parseToJsonElement(jsonStr)
                     // 把 Spider 返回的本地 proxy URL 替换为 Bridge 实际地址
-                    val hostHeader = request.headers["Host"] ?: "localhost:${request.local.localPort}"
-                    val bridgeBase = "http://$hostHeader"
-                    var fixed = authorizeLocalProxyUrls(jsonStr, bridgeBase)
-                    fixed = fixed.replace("http://127.0.0.1:-1", bridgeBase)
+                    var fixed = authorizeLocalProxyUrls(jsonStr, publicBaseUrl)
+                    fixed = fixed.replace("http://127.0.0.1:-1", publicBaseUrl)
                     // 修复部分 spider 拼接 host 时重复出现两个 https://（如 ysj/doll）
                     // 形如 "https://www.dmmiku.comhttps://img.dmmiku.com/..." → 取后段
                     fixed = doubleSchemeRegex.replace(fixed, "\"$1")
@@ -307,7 +365,11 @@ private suspend fun ApplicationCall.respondResult(result: Result<String>) {
     )
 }
 
-private suspend fun ApplicationCall.respondSpiderPlayResult(result: Result<String>) {
+private suspend fun ApplicationCall.respondSpiderPlayResult(
+    result: Result<String>,
+    publicBaseUrl: String,
+    maxResponseBytes: Long,
+) {
     result.getOrNull()?.let { body ->
         val parse = runCatching { JSONObject(body).optInt("parse", 0) }.getOrDefault(0)
         if (parse != 0) {
@@ -319,7 +381,41 @@ private suspend fun ApplicationCall.respondSpiderPlayResult(result: Result<Strin
             return
         }
     }
-    respondResult(result)
+    respondResult(result, publicBaseUrl, maxResponseBytes)
+}
+
+private suspend fun ApplicationCall.acquireGatewayPermit(
+    guard: GatewayRequestGuard,
+    config: BridgeConfig,
+    authenticationRequired: Boolean = true,
+): AutoCloseable? {
+    if (request.queryString().length > config.security.maxQueryLength) {
+        respondApiError(HttpStatusCode.PayloadTooLarge, "QUERY_TOO_LARGE", "Query string is too large")
+        return null
+    }
+    val access = guard.acquire(
+        clientId = request.local.remoteHost,
+        authorization = request.headers[HttpHeaders.Authorization],
+        apiKey = request.headers["X-API-Key"],
+        authenticationRequired = authenticationRequired,
+    )
+    access.permit?.let { return it }
+    when (access.denial) {
+        GatewayDenial.UNAUTHORIZED -> {
+            response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+            respondApiError(HttpStatusCode.Unauthorized, "UNAUTHORIZED", "Authentication required")
+        }
+        GatewayDenial.RATE_LIMITED -> {
+            response.headers.append(HttpHeaders.RetryAfter, "60")
+            respondApiError(HttpStatusCode.TooManyRequests, "RATE_LIMITED", "Too many requests")
+        }
+        GatewayDenial.BUSY -> {
+            response.headers.append(HttpHeaders.RetryAfter, "1")
+            respondApiError(HttpStatusCode.ServiceUnavailable, "GATEWAY_BUSY", "Gateway is busy")
+        }
+        null -> respondApiError(HttpStatusCode.InternalServerError, "GUARD_ERROR", "Request guard failed")
+    }
+    return null
 }
 
 private suspend fun ApplicationCall.respondError(code: Int, msg: String) {
@@ -344,6 +440,7 @@ private suspend fun ApplicationCall.respondCmsError(error: CmsProxyException) {
         "UPSTREAM_TIMEOUT" -> HttpStatusCode.GatewayTimeout
         "UPSTREAM_INVALID_JSON", "UPSTREAM_HTTP_ERROR", "UPSTREAM_UNAVAILABLE" ->
             HttpStatusCode.BadGateway
+        "UPSTREAM_RESPONSE_TOO_LARGE" -> HttpStatusCode.PayloadTooLarge
         "REMOTE_TARGET_FORBIDDEN", "REMOTE_SCHEME_FORBIDDEN", "REMOTE_DNS_FAILED" ->
             HttpStatusCode.BadGateway
         else -> HttpStatusCode.InternalServerError

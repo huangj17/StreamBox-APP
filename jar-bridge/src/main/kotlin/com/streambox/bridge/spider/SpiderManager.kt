@@ -51,7 +51,10 @@ class SpiderManager(private val config: BridgeConfig) {
     }
 
     private fun load(plugin: PluginConfig) {
-        val jarFile = LocalJarPolicy.resolve(Path.of(plugin.jar)).toFile()
+        val jarFile = LocalJarPolicy.resolveAndVerify(
+            Path.of(plugin.jar),
+            plugin.sha256,
+        ).toFile()
 
         val classLoader = URLClassLoader(
             arrayOf(jarFile.toURI().toURL()),

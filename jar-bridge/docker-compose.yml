@@ -2,7 +2,11 @@ services:
   gateway:
     build: .
     ports:
-      - "9978:9978"
+      - "127.0.0.1:9978:9978"
+    environment:
+      # 容器内必须监听全部接口，宿主机仍只暴露到 127.0.0.1。
+      BRIDGE_HOST: "0.0.0.0"
+      BRIDGE_PUBLIC_BASE_URL: "http://127.0.0.1:9978"
     volumes:
       - ./plugins:/app/plugins:ro
       - ./config.yml:/app/config.yml:ro

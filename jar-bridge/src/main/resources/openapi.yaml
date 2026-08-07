@@ -7,10 +7,19 @@ info:
     Gateway 是可选组件；Flutter 客户端也可以直接连接普通 CMS 源。
 servers:
   - url: http://localhost:9978
+security:
+  - bearerAuth: []
 tags:
   - name: Gateway
   - name: Content
 paths:
+  /health/live:
+    get:
+      security: []
+      tags: [Gateway]
+      summary: 不暴露内部信息的存活检查
+      responses:
+        "200": {description: Gateway 进程存活}
   /api/list:
     get:
       tags: [Gateway]
@@ -79,6 +88,10 @@ paths:
         "400": {description: BAD_QUERY 或 PLAY_RESOLUTION_UNSUPPORTED}
         "404": {description: SOURCE_NOT_FOUND}
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
     Source:
       type: object

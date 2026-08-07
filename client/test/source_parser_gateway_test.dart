@@ -52,7 +52,7 @@ void main() {
 
     final config = await SourceParser(
       dio,
-    ).probeGateway('http://bridge.example');
+    ).probeGateway('https://bridge.example');
 
     expect(config!.sites.single.sourceKind, SiteSourceKind.jar);
     expect(config.sites.single.gatewayStatus, GatewaySourceStatus.ready);

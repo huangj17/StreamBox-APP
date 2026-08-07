@@ -12,6 +12,7 @@ import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/platform/platform_service.dart';
 import '../../core/platform/network_speed_monitor.dart';
+import '../../core/network/url_policy.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/site.dart';
 import '../../data/models/watch_history.dart';
@@ -455,6 +456,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         url = result.url;
         headers = result.headers;
       }
+      url = UrlPolicy.requirePlaybackUrl(url).toString();
       await _engine.open(url, headers: headers);
     } catch (error) {
       if (!mounted || requestId != _playRequestId) return;

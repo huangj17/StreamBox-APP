@@ -29,6 +29,7 @@ class CmsProxyService(
     connectTimeoutMs: Long = 5_000,
     readTimeoutMs: Long = 15_000,
     callTimeoutMs: Long = 20_000,
+    private val maxResponseBytes: Long = 10L * 1024 * 1024,
     private val remoteTargetPolicy: RemoteTargetPolicy? = null,
 ) : AutoCloseable {
     private val dispatcher = Dispatcher().apply {
@@ -133,7 +134,27 @@ class CmsProxyService(
                             message = "CMS upstream returned HTTP ${response.code}",
                         )
                     }
-                    val body = response.body?.string().orEmpty()
+                    val responseBody = response.body
+                        ?: throw CmsProxyException(
+                            code = "UPSTREAM_INVALID_JSON",
+                            message = "CMS upstream returned an empty body",
+                        )
+                    if (responseBody.contentLength() > maxResponseBytes) {
+                        throw CmsProxyException(
+                            code = "UPSTREAM_RESPONSE_TOO_LARGE",
+                            message = "CMS upstream response exceeds configured size limit",
+                        )
+                    }
+                    val bytes = responseBody.byteStream().use { input ->
+                        input.readNBytes((maxResponseBytes + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                    }
+                    if (bytes.size > maxResponseBytes) {
+                        throw CmsProxyException(
+                            code = "UPSTREAM_RESPONSE_TOO_LARGE",
+                            message = "CMS upstream response exceeds configured size limit",
+                        )
+                    }
+                    val body = bytes.toString(Charsets.UTF_8)
                     if (body.isBlank()) {
                         throw CmsProxyException(
                             code = "UPSTREAM_INVALID_JSON",

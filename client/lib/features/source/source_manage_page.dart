@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../core/network/url_policy.dart';
 import '../../data/local/source_storage.dart';
 import '../../data/models/site.dart';
 import '../../data/models/source_config.dart';
 import '../../data/models/warehouse.dart';
+import '../../data/sources/source_parser.dart';
 import '../../widgets/tv_focus.dart';
 import '../home/providers/categories_provider.dart';
 import 'providers/source_provider.dart';
@@ -94,6 +96,19 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
   Future<void> _addSource(String url) async {
     final trimmed = url.trim();
     if (trimmed.isEmpty) return;
+
+    try {
+      if (SourceParser.isJarBridgeUrl(trimmed)) {
+        UrlPolicy.requireGatewayUrl(trimmed);
+      } else if (SourceParser.isCmsApiUrl(trimmed)) {
+        UrlPolicy.requireCmsApiUrl(trimmed);
+      } else {
+        UrlPolicy.requireConfigUrl(trimmed);
+      }
+    } on FormatException catch (error) {
+      _setStatus(error.message, error: true);
+      return;
+    }
 
     setState(() => _loading = true);
 

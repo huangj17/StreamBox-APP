@@ -64,4 +64,61 @@ class BridgeConfigTest {
 
         assertEquals("PRIVATE_CIDR_INVALID", error.code)
     }
+
+    @Test
+    fun `requires a strong token when authentication is enabled`() {
+        val missing = assertFailsWith<ConfigValidationException> {
+            ConfigValidator.validate(
+                BridgeConfig(security = SecurityConfig(requireAuth = true)),
+            )
+        }
+        assertEquals("API_TOKEN_REQUIRED", missing.code)
+
+        val short = assertFailsWith<ConfigValidationException> {
+            ConfigValidator.validate(
+                BridgeConfig(security = SecurityConfig(apiToken = "short")),
+            )
+        }
+        assertEquals("API_TOKEN_TOO_SHORT", short.code)
+    }
+
+    @Test
+    fun `requires sha256 for every configured plugin`() {
+        val error = assertFailsWith<ConfigValidationException> {
+            ConfigValidator.validate(
+                BridgeConfig(
+                    plugins = listOf(
+                        PluginConfig(
+                            key = "manual",
+                            name = "Manual",
+                            jar = "plugins/manual.jar",
+                            className = "com.example.Manual",
+                        ),
+                    ),
+                ),
+            )
+        }
+        assertEquals("PLUGIN_SHA256_REQUIRED", error.code)
+    }
+
+    @Test
+    fun `remote public base requires https and authentication`() {
+        val plaintext = assertFailsWith<ConfigValidationException> {
+            ConfigValidator.validate(
+                BridgeConfig(
+                    server = ServerConfig(publicBaseUrl = "http://gateway.example.com"),
+                ),
+            )
+        }
+        assertEquals("REMOTE_GATEWAY_REQUIRES_HTTPS", plaintext.code)
+
+        val anonymous = assertFailsWith<ConfigValidationException> {
+            ConfigValidator.validate(
+                BridgeConfig(
+                    server = ServerConfig(publicBaseUrl = "https://gateway.example.com"),
+                ),
+            )
+        }
+        assertEquals("REMOTE_GATEWAY_REQUIRES_AUTH", anonymous.code)
+    }
 }

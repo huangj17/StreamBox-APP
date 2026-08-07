@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import '../../core/network/bounded_response.dart';
+import '../../core/network/gateway_auth.dart';
+import '../../core/network/url_policy.dart';
 import '../models/source_config.dart';
 import '../models/site.dart';
 import '../models/warehouse.dart';
@@ -8,6 +11,8 @@ import '../models/warehouse.dart';
 /// 下载 URL → 解析 JSON → 提取 sites 列表
 /// 支持单仓（sites 数组）和多仓（urls / storeHouse 数组）格式
 class SourceParser {
+  static const _maxConfigBytes = 5 * 1024 * 1024;
+  static const _maxGatewayListBytes = 1024 * 1024;
   final Dio _dio;
 
   SourceParser(this._dio);
@@ -27,14 +32,13 @@ class SourceParser {
 
   /// 下载 URL 并解码为 JSON Map
   Future<Map<String, dynamic>> _fetchJson(String url) async {
-    final response = await _dio.get(
-      url,
-      options: Options(
-        responseType: ResponseType.plain,
-        receiveTimeout: const Duration(seconds: 15),
-      ),
+    final validated = UrlPolicy.requireConfigUrl(url);
+    final jsonStr = await getBoundedText(
+      _dio,
+      validated.toString(),
+      receiveTimeout: const Duration(seconds: 15),
+      maxBytes: _maxConfigBytes,
     );
-    final jsonStr = response.data as String;
     return jsonDecode(jsonStr) as Map<String, dynamic>;
   }
 
@@ -111,20 +115,22 @@ class SourceParser {
     final baseUrl = gatewayUrl.endsWith('/')
         ? gatewayUrl.substring(0, gatewayUrl.length - 1)
         : gatewayUrl;
-    final baseUri = Uri.tryParse(baseUrl);
-    if (baseUri == null || !baseUri.hasScheme || !baseUri.hasAuthority) {
+    final Uri baseUri;
+    try {
+      baseUri = UrlPolicy.requireGatewayUrl(baseUrl);
+    } on FormatException {
       return null;
     }
     try {
-      final response = await _dio.get(
+      final body = await getBoundedText(
+        _dio,
         '$baseUrl/api/list',
-        options: Options(
-          responseType: ResponseType.plain,
-          sendTimeout: const Duration(seconds: 2),
-          receiveTimeout: const Duration(seconds: 2),
-        ),
+        headers: GatewayAuth.headers,
+        sendTimeout: const Duration(seconds: 2),
+        receiveTimeout: const Duration(seconds: 2),
+        maxBytes: _maxGatewayListBytes,
       );
-      final decoded = jsonDecode(response.data as String);
+      final decoded = jsonDecode(body);
       if (decoded is! Map<String, dynamic> || decoded['code'] != 200) {
         return null;
       }
@@ -203,6 +209,7 @@ class SourceParser {
 
   /// 将普通 CMS API URL 包装为 SourceConfig
   static SourceConfig wrapCmsUrl(String url) {
-    return SourceConfig(sites: [Site.fromUrl(url)]);
+    final validated = UrlPolicy.requireCmsApiUrl(url);
+    return SourceConfig(sites: [Site.fromUrl(validated.toString())]);
   }
 }

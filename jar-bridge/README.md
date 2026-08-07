@@ -27,14 +27,15 @@ StreamBox (Flutter) --HTTP--> Gateway (JVM) --Spider--> 内容站点
 # 1. 把已转换为标准 JVM class 的 Spider JAR 放入 plugins/
 cp your_spider.jar plugins/
 
-# 2. 在 config.yml 中添加插件 key、名称、JAR 路径和入口类
+# 2. 计算 JAR 哈希，并在 config.yml 中添加路径、入口类和 sha256
+shasum -a 256 plugins/your_spider.jar
 
 # 3. 启动
 ./gradlew run
 ```
 
-默认监听 `http://0.0.0.0:9978`，Swagger 页面位于
-`http://localhost:9978/swagger`。
+默认只监听 `http://127.0.0.1:9978`。API 文档默认关闭，需要时设置
+`server.enableDocs: true` 后访问 `http://127.0.0.1:9978/swagger`。
 
 常用命令：
 
@@ -54,18 +55,22 @@ curl -fsS http://localhost:9978/health
 curl -fsS http://localhost:9978/api/list
 ```
 
-Compose 只启动 `gateway` 服务，并只读挂载 `config.yml` 与 `plugins/`。镜像以非 root
-用户运行，根文件系统只读，仅 `data` 卷和 `/tmp` 可写。
+Compose 只把端口发布到宿主机 `127.0.0.1`，并只读挂载 `config.yml` 与 `plugins/`。
+运行镜像使用无 shell 的 distroless JRE、非 root 用户和只读根文件系统，仅 `data` 卷
+和 `/tmp` 可写。
 
-> Spider JAR 是可执行代码，`URLClassLoader` 不是安全沙箱。只加载来源可信或已审计
-> 的插件；不可信插件必须放在额外隔离的环境中运行。
+> Spider JAR 是可执行代码，`URLClassLoader` 不是安全沙箱。生产环境应使用 Docker
+> 作为最小隔离边界；不同来源、不同信任等级的 JAR 应拆到不同 Gateway 容器，并在
+> 宿主机防火墙中限制容器出站目标。不要用 `./gradlew run` 执行不可信 JAR。
 
 ## 配置
 
 ```yaml
 server:
   port: 9978
-  host: "0.0.0.0"
+  host: "127.0.0.1"
+  publicBaseUrl: "http://127.0.0.1:9978"
+  enableDocs: false
 
 timeout: 15000
 logLevel: INFO
@@ -76,11 +81,18 @@ catalog:
 security:
   allowedPrivateHosts: []
   allowedPrivateCidrs: []
+  requireAuth: false
+  rateLimitPerMinute: 120
+  rateLimitBurst: 30
+  maxConcurrentRequests: 32
+  maxResponseBytes: 10485760
+  maxQueryLength: 4096
 
 plugins:
   - key: "my_source"
     name: "我的源"
     jar: "plugins/spider.jar"
+    sha256: "将 shasum -a 256 的结果填在这里"
     class: "com.example.MySpider"
     ext: ""
     hidden: false
@@ -89,22 +101,46 @@ plugins:
 - `key` 必须唯一，并成为 `/api/{key}` 中的路径参数。
 - `jar` 是相对于 `jar-bridge/` 运行目录的本地文件路径。
 - `class` 是 Spider 入口类全限定名。
+- `sha256` 是必填的 64 位小写 SHA-256；文件被替换后 Gateway 会拒绝加载。
 - `ext` 会原样传给插件的 `init()`。
 - `hidden: true` 的插件仍可调用，但不会出现在 `/api/list`。
 - `timeout` 是单次 Spider 方法调用的毫秒超时。
+- `publicBaseUrl` 是 Gateway 写入代理链接的可信公开 Origin，不读取请求的 Host 头。
+- `requireAuth: true` 时必须通过环境变量 `BRIDGE_API_TOKEN` 提供至少 32 字符的 Token。
+- 远程部署必须使用 HTTPS 反向代理、开启认证，并限制来源 IP；不要直接发布 9978。
+
+远程认证示例：
+
+```bash
+export BRIDGE_REQUIRE_AUTH=true
+export BRIDGE_API_TOKEN='至少-32-字符-的-随机-token-请自行替换'
+export BRIDGE_PUBLIC_BASE_URL='https://gateway.example.com'
+./gradlew run
+
+curl -H "Authorization: Bearer $BRIDGE_API_TOKEN" \
+  https://gateway.example.com/api/list
+```
+
+Flutter 客户端通过 `--dart-define` 注入同一个 Token，不把密钥放进源 URL：
+
+```bash
+flutter run -d macos \
+  --dart-define=STREAMBOX_GATEWAY_TOKEN='至少-32-字符-的-随机-token-请自行替换'
+```
 
 ## API
 
 | 端点 | 说明 |
 | --- | --- |
 | `GET /health` | Gateway、目录与插件健康状态 |
+| `GET /health/live` | 不需要认证的最小存活检查 |
 | `GET /api/list` | 列出所有公开插件 |
 | `GET /api/{key}?ac=class` | 分类列表 |
 | `GET /api/{key}?t={tid}&pg={n}` | 分类视频列表 |
 | `GET /api/{key}?ac=detail&ids={id}` | 视频详情 |
 | `GET /api/{key}?wd={keyword}` | 搜索 |
 | `GET /api/{key}/play?flag={flag}&id={id}` | 播放地址二次解析 |
-| `GET /swagger` | Swagger UI |
+| `GET /swagger` | Swagger UI（默认关闭） |
 
 验证示例：
 

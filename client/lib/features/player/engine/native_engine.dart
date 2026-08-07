@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/widgets.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/network/bounded_response.dart';
+import '../../../core/network/url_policy.dart';
 import 'video_engine.dart';
 
 /// 移动/TV 端播放引擎：基于 video_player
@@ -84,6 +86,7 @@ class NativeEngine implements VideoEngine {
 
   @override
   Future<void> open(String url, {Map<String, String>? headers}) async {
+    url = UrlPolicy.requirePlaybackUrl(url).toString();
     final generation = ++_openGeneration;
     _masterUrl = url;
     _masterHeaders = Map.unmodifiable(headers ?? const {});
@@ -277,11 +280,12 @@ class NativeEngine implements VideoEngine {
           responseType: ResponseType.plain,
         ),
       );
-      final resp = await dio.get<String>(
+      final text = await getBoundedText(
+        dio,
         url,
-        options: Options(headers: headers),
+        headers: headers,
+        maxBytes: 2 * 1024 * 1024,
       );
-      final text = resp.data ?? '';
       if (!text.contains('#EXT-X-STREAM-INF')) return;
       final parsed = _parseMasterPlaylist(text, url);
       if (_disposed || generation != _openGeneration) return;

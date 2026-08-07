@@ -6,8 +6,8 @@ class SourceStorage {
 
   /// 内置片源（预置源，不可删除）
   static const builtInUrls = [
-    // 自建 JAR Bridge 服务（放最前，方便用户识别）
-    'http://1.14.171.39:9978',
+    // 本机 JAR Bridge。远程 Bridge 必须由用户显式添加并使用 HTTPS。
+    'http://127.0.0.1:9978',
     // 暴风：默认选中的 CMS 源（金鹰 jyzyapi 已挂，2026-05-09 移除）
     'https://bfzyapi.com/api.php/provide/vod/',
     'https://www.hongniuzy2.com/api.php/provide/vod/',
@@ -19,6 +19,7 @@ class SourceStorage {
   /// 已下架/失效的旧默认源 — 启动时从用户 Hive 里清理掉
   static const _deprecatedUrls = [
     'https://jyzyapi.com/api.php/provide/vod/', // 金鹰：服务挂了
+    'http://1.14.171.39:9978', // 已停用的公网明文 Gateway
   ];
 
   /// 预置第三方片源
@@ -36,8 +37,8 @@ class SourceStorage {
 
   /// 已知片源的友好名称和描述
   static const sourceInfo = <String, ({String name, String desc})>{
-    'http://1.14.171.39:9978':
-        (name: 'JAR Bridge', desc: '自建服务 · JAR 插件源'),
+    'http://127.0.0.1:9978':
+        (name: 'JAR Bridge', desc: '本机服务 · JAR 插件源'),
     'https://bfzyapi.com/api.php/provide/vod/':
         (name: '暴风资源', desc: 'HD · 13万+ · 多CDN'),
     'https://www.hongniuzy2.com/api.php/provide/vod/':

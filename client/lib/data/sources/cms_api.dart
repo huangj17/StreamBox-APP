@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import '../../core/network/bounded_response.dart';
+import '../../core/network/gateway_auth.dart';
+import '../../core/network/url_policy.dart';
 import '../models/site.dart';
 import '../models/category.dart';
 import '../models/video_list_result.dart';
@@ -14,27 +17,39 @@ class PlayResult {
 
 /// 苹果 CMS 网络请求层
 class CmsApi {
+  static const _maxCmsResponseBytes = 10 * 1024 * 1024;
   final Dio _dio;
 
   CmsApi(this._dio);
 
-  Map<String, dynamic> _decode(Response response) {
-    // 部分 CMS 返回 text/html content-type，需手动解码
-    if (response.data is String) {
-      return jsonDecode(response.data as String) as Map<String, dynamic>;
-    }
-    return response.data as Map<String, dynamic>;
+  Future<Map<String, dynamic>> _getJson(
+    String rawUrl, {
+    Map<String, dynamic>? queryParameters,
+    Duration sendTimeout = const Duration(seconds: 8),
+    Duration receiveTimeout = const Duration(seconds: 8),
+    bool gateway = false,
+  }) async {
+    final url = UrlPolicy.requireCmsApiUrl(rawUrl, allowLoopback: gateway);
+    final text = await getBoundedText(
+      _dio,
+      url.toString(),
+      queryParameters: queryParameters,
+      headers: gateway ? GatewayAuth.headers : null,
+      sendTimeout: sendTimeout,
+      receiveTimeout: receiveTimeout,
+      maxBytes: _maxCmsResponseBytes,
+    );
+    return jsonDecode(text) as Map<String, dynamic>;
   }
 
   /// 获取分类列表
   /// GET {api}?ac=class
   Future<List<Category>> fetchCategories(Site site) async {
-    final response = await _dio.get(
+    final data = await _getJson(
       site.api,
       queryParameters: {'ac': 'class'},
-      options: Options(sendTimeout: const Duration(seconds: 8)),
+      gateway: site.isBridge,
     );
-    final data = _decode(response);
     final list = data['class'] as List<dynamic>? ?? [];
     return list
         .map(
@@ -59,12 +74,11 @@ class CmsApi {
     };
     if (year != null && year.isNotEmpty) params['year'] = year;
 
-    final response = await _dio.get(
+    final data = await _getJson(
       site.api,
       queryParameters: params,
-      options: Options(sendTimeout: const Duration(seconds: 8)),
+      gateway: site.isBridge,
     );
-    final data = _decode(response);
     return VideoListResult.fromJson(data, siteKey: site.key);
   }
 
@@ -74,12 +88,11 @@ class CmsApi {
     required Site site,
     required String videoId,
   }) async {
-    final response = await _dio.get(
+    final data = await _getJson(
       site.api,
       queryParameters: {'ac': 'detail', 'ids': videoId},
-      options: Options(sendTimeout: const Duration(seconds: 8)),
+      gateway: site.isBridge,
     );
-    final data = _decode(response);
     final list = data['list'] as List<dynamic>? ?? [];
     if (list.isEmpty) return null;
     return CmsVideoDetail.fromJson(list[0] as Map<String, dynamic>);
@@ -94,15 +107,12 @@ class CmsApi {
     if (!site.isBridge) {
       throw ArgumentError.value(site.api, 'site', 'Site is not a JAR Bridge');
     }
-    final response = await _dio.get(
+    final data = await _getJson(
       '${site.api}/play',
       queryParameters: {'flag': flag, 'id': rawUrl},
-      options: Options(
-        sendTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 20),
-      ),
+      receiveTimeout: const Duration(seconds: 20),
+      gateway: true,
     );
-    final data = _decode(response);
     final parse = switch (data['parse']) {
       final num value => value.toInt(),
       final String value => int.tryParse(value) ?? 0,
@@ -111,10 +121,11 @@ class CmsApi {
     if (parse != 0) {
       throw const FormatException('该线路仍需要网页解析，当前播放器无法直接播放');
     }
-    final url = data['url']?.toString().trim() ?? '';
-    if (url.isEmpty) {
+    final rawResolvedUrl = data['url']?.toString().trim() ?? '';
+    if (rawResolvedUrl.isEmpty) {
       throw const FormatException('Bridge 未返回有效播放地址');
     }
+    final url = UrlPolicy.requirePlaybackUrl(rawResolvedUrl).toString();
     final rawHeaders = data['header'];
     final headers = rawHeaders is Map
         ? rawHeaders.map(
@@ -130,12 +141,11 @@ class CmsApi {
     required Site site,
     required String keyword,
   }) async {
-    final response = await _dio.get(
+    final data = await _getJson(
       site.api,
       queryParameters: {'wd': keyword},
-      options: Options(sendTimeout: const Duration(seconds: 8)),
+      gateway: site.isBridge,
     );
-    final data = _decode(response);
     return VideoListResult.fromJson(data, siteKey: site.key);
   }
 }

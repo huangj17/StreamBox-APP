@@ -44,13 +44,24 @@ class ProxyFetcherTest {
 
         val encodedUrl = url.queryParameter("url")!!
         val encodedHeader = url.queryParameter("header")
+        val expiresAt = url.queryParameter("exp")?.toLong()
         val signature = url.queryParameter("sig")
-        assertTrue(isAuthorizedProxyRequest(encodedUrl, encodedHeader, signature))
+        assertTrue(isAuthorizedProxyRequest(encodedUrl, encodedHeader, expiresAt, signature))
         assertFalse(
             isAuthorizedProxyRequest(
                 "aHR0cDovLzEyNy4wLjAuMS8=",
                 encodedHeader,
+                expiresAt,
                 signature,
+            )
+        )
+        assertFalse(
+            isAuthorizedProxyRequest(
+                encodedUrl,
+                encodedHeader,
+                expiresAt,
+                signature,
+                nowEpochSeconds = checkNotNull(expiresAt) + 1,
             )
         )
     }

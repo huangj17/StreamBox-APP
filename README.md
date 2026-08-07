@@ -64,7 +64,7 @@ flutter run -d macos
 ```bash
 # 终端 1：启动 Bridge
 cd jar-bridge
-./gradlew run                       # 监听 0.0.0.0:9978
+./gradlew run                       # 仅监听 127.0.0.1:9978
 
 # 终端 2：启动客户端
 cd client

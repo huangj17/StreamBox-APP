@@ -51,7 +51,10 @@ fun main() {
         allowedPrivateHosts = config.security.allowedPrivateHosts.toSet(),
         allowedPrivateCidrs = config.security.allowedPrivateCidrs.toSet(),
     )
-    val cmsProxyService = CmsProxyService(remoteTargetPolicy = remoteTargetPolicy)
+    val cmsProxyService = CmsProxyService(
+        remoteTargetPolicy = remoteTargetPolicy,
+        maxResponseBytes = config.security.maxResponseBytes,
+    )
     val server = embeddedServer(Netty, port = config.server.port, host = config.server.host) {
         module(
             manager = manager,
@@ -111,10 +114,14 @@ fun Application.module(
         cmsProxyService.close()
     }
 
-    configureRoutes(mgr, catalogs, cmsProxyService)
+    configureRoutes(mgr, catalogs, loadedConfig, cmsProxyService)
     routing {
-        swaggerUI(path = "docs", swaggerFile = "openapi.yaml")
-        swaggerUI(path = "swagger", swaggerFile = "openapi.yaml")
-        get("/") { call.respondRedirect("/docs", permanent = false) }
+        if (loadedConfig.server.enableDocs) {
+            swaggerUI(path = "docs", swaggerFile = "openapi.yaml")
+            swaggerUI(path = "swagger", swaggerFile = "openapi.yaml")
+            get("/") { call.respondRedirect("/docs", permanent = false) }
+        } else {
+            get("/") { call.respondRedirect("/health/live", permanent = false) }
+        }
     }
 }

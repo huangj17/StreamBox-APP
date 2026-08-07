@@ -2,7 +2,9 @@
 
 server:
   port: 9978
-  host: "0.0.0.0"
+  host: "127.0.0.1"
+  publicBaseUrl: "http://127.0.0.1:9978"
+  enableDocs: false
 
 timeout: 15000
 logLevel: INFO
@@ -13,24 +15,33 @@ catalog:
 security:
   allowedPrivateHosts: []
   allowedPrivateCidrs: []
+  requireAuth: false
+  rateLimitPerMinute: 120
+  rateLimitBurst: 30
+  maxConcurrentRequests: 32
+  maxResponseBytes: 10485760
+  maxQueryLength: 4096
 
 # 插件列表（已验证可用，顺序即优先级）
 plugins:
   - key: "jianpian"
     name: "荐片视频"
     jar: "plugins/custom_spider_classes.jar"
+    sha256: "14eda8aafc01398404b5b021bfb7103214e7493df3f507d865c4af450b5c0e66"
     class: "com.github.catvod.spider.Jianpian"
     ext: ""
 
   - key: "ikanbot"
     name: "爱看机器人"
     jar: "plugins/custom_spider_classes.jar"
+    sha256: "14eda8aafc01398404b5b021bfb7103214e7493df3f507d865c4af450b5c0e66"
     class: "com.github.catvod.spider.Ikanbot"
     ext: '{"box": "TVBox", "danmu": false}'
 
   - key: "ysj"
     name: "异世界动漫"
     jar: "plugins/custom_spider_classes.jar"
+    sha256: "14eda8aafc01398404b5b021bfb7103214e7493df3f507d865c4af450b5c0e66"
     class: "com.github.catvod.spider.Ysj"
     ext: ""
 
@@ -39,6 +50,7 @@ plugins:
   - key: "doll"
     name: "Doll"
     jar: "plugins/custom_spider_classes.jar"
+    sha256: "14eda8aafc01398404b5b021bfb7103214e7493df3f507d865c4af450b5c0e66"
     class: "com.github.catvod.spider.Doll"
     ext: ""
     hidden: true

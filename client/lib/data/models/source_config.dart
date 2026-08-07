@@ -1,4 +1,5 @@
 import 'site.dart';
+import '../../core/network/url_policy.dart';
 
 /// TVBox JSON 配置文件模型
 class SourceConfig {
@@ -34,7 +35,7 @@ class SourceConfig {
     final api = s.api.toLowerCase();
     return !s.isBridge &&
         s.type != 4 &&
-        api.startsWith('http') &&
+        UrlPolicy.isSafeCmsApi(s.api) &&
         !api.endsWith('.js');
   }).toList();
 }

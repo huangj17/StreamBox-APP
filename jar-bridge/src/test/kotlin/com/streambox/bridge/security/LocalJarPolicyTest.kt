@@ -20,4 +20,25 @@ class LocalJarPolicyTest {
             LocalJarPolicy.resolve(workspace.resolve("outside.jar"), plugins)
         }
     }
+
+    @Test
+    fun `manual jar must match its configured sha256`() {
+        val workspace = createTempDirectory("local-jar-hash")
+        val plugins = workspace.resolve("plugins")
+        Files.createDirectories(plugins)
+        val jar = plugins.resolve("manual.jar")
+        Files.writeString(jar, "trusted plugin")
+
+        assertEquals(
+            jar.toRealPath(),
+            LocalJarPolicy.resolveAndVerify(
+                jar,
+                "3650e1b8e523884aedb26355f3365108349269db7bcc28e1eeb762d454812d60",
+                plugins,
+            ),
+        )
+        assertFailsWith<SecurityException> {
+            LocalJarPolicy.resolveAndVerify(jar, "0".repeat(64), plugins)
+        }
+    }
 }

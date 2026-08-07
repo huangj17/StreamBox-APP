@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../../core/network/url_policy.dart';
 import 'video_engine.dart';
 
 /// 桌面端播放引擎：基于 media_kit / libmpv
@@ -157,8 +158,10 @@ class MediaKitEngine implements VideoEngine {
   Stream<VideoQuality> get currentQualityStream => _currentQualityCtrl.stream;
 
   @override
-  Future<void> open(String url, {Map<String, String>? headers}) =>
-      _player.open(Media(url, httpHeaders: headers));
+  Future<void> open(String url, {Map<String, String>? headers}) {
+    final validated = UrlPolicy.requirePlaybackUrl(url);
+    return _player.open(Media(validated.toString(), httpHeaders: headers));
+  }
 
   @override
   Future<void> play() => _player.play();

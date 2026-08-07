@@ -23,6 +23,7 @@ import javax.crypto.spec.SecretKeySpec
 
 internal const val MAX_PROXY_RESPONSE_BYTES = 10 * 1024 * 1024
 private const val MAX_REDIRECTS = 3
+private const val PROXY_URL_TTL_SECONDS = 5 * 60L
 private val proxySemaphore = Semaphore(16)
 private val localProxyUrlRegex =
     Regex("""http://127\.0\.0\.1:-1/proxy\?([^"\\\s]+)""")
@@ -47,26 +48,34 @@ internal fun authorizeLocalProxyUrls(json: String, bridgeBase: String): String =
             ?: return@replace match.value
         val encodedUrl = parsed.queryParameter("url") ?: return@replace match.value
         val encodedHeader = parsed.queryParameter("header")
-        val signature = proxySignature(encodedUrl, encodedHeader)
-        "$bridgeBase/proxy?$query&sig=$signature"
+        val expiresAt = System.currentTimeMillis() / 1000 + PROXY_URL_TTL_SECONDS
+        val signature = proxySignature(encodedUrl, encodedHeader, expiresAt)
+        "$bridgeBase/proxy?$query&exp=$expiresAt&sig=$signature"
     }
 
 internal fun isAuthorizedProxyRequest(
     encodedUrl: String,
     encodedHeader: String?,
+    expiresAt: Long?,
     signature: String?,
+    nowEpochSeconds: Long = System.currentTimeMillis() / 1000,
 ): Boolean {
-    if (signature == null) return false
+    if (
+        signature == null ||
+        expiresAt == null ||
+        expiresAt < nowEpochSeconds ||
+        expiresAt > nowEpochSeconds + PROXY_URL_TTL_SECONDS
+    ) return false
     return MessageDigest.isEqual(
-        proxySignature(encodedUrl, encodedHeader).toByteArray(Charsets.US_ASCII),
+        proxySignature(encodedUrl, encodedHeader, expiresAt).toByteArray(Charsets.US_ASCII),
         signature.toByteArray(Charsets.US_ASCII),
     )
 }
 
-private fun proxySignature(encodedUrl: String, encodedHeader: String?): String {
+private fun proxySignature(encodedUrl: String, encodedHeader: String?, expiresAt: Long): String {
     val mac = Mac.getInstance("HmacSHA256")
     mac.init(SecretKeySpec(proxySigningKey, "HmacSHA256"))
-    val payload = "$encodedUrl\n${encodedHeader ?: ""}"
+    val payload = "$encodedUrl\n${encodedHeader ?: ""}\n$expiresAt"
     return java.util.Base64.getUrlEncoder()
         .withoutPadding()
         .encodeToString(mac.doFinal(payload.toByteArray(Charsets.UTF_8)))

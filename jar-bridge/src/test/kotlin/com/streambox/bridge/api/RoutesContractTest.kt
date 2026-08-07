@@ -10,8 +10,12 @@ import com.streambox.bridge.catalog.SourceKind
 import com.streambox.bridge.catalog.SourceOrigin
 import com.streambox.bridge.catalog.SpiderRuntime
 import com.streambox.bridge.module
+import com.streambox.bridge.config.BridgeConfig
+import com.streambox.bridge.config.SecurityConfig
 import com.sun.net.httpserver.HttpServer
 import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.http.HttpHeaders
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
@@ -28,6 +32,69 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 class RoutesContractTest {
+    @Test
+    fun `protected gateway rejects missing token and accepts bearer token`() = testApplication {
+        val token = "a".repeat(32)
+        application {
+            module(
+                catalogManager = catalogManager(ContractSpiderRuntime("manual", "Manual")),
+                config = BridgeConfig(
+                    security = SecurityConfig(requireAuth = true, apiToken = token),
+                ),
+            )
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/list").status)
+        assertEquals(HttpStatusCode.OK, client.get("/health/live").status)
+        assertEquals(
+            HttpStatusCode.OK,
+            client.get("/api/list") {
+                header(HttpHeaders.Authorization, "Bearer $token")
+            }.status,
+        )
+    }
+
+    @Test
+    fun `gateway applies per-client rate and query size limits`() = testApplication {
+        application {
+            module(
+                catalogManager = catalogManager(ContractSpiderRuntime("manual", "Manual")),
+                config = BridgeConfig(
+                    security = SecurityConfig(
+                        rateLimitPerMinute = 1,
+                        rateLimitBurst = 1,
+                        maxQueryLength = 8,
+                    ),
+                ),
+            )
+        }
+
+        assertEquals(
+            HttpStatusCode.PayloadTooLarge,
+            client.get("/api/manual?query-is-too-long=true").status,
+        )
+        assertEquals(HttpStatusCode.OK, client.get("/api/list").status)
+        assertEquals(HttpStatusCode.TooManyRequests, client.get("/api/list").status)
+    }
+
+    @Test
+    fun `gateway rejects an oversized plugin response`() = testApplication {
+        val oversized = object : ContractSpiderRuntime("manual", "Manual") {
+            override suspend fun searchContent(keyword: String, quick: Boolean): Result<String> =
+                Result.success("{\"value\":\"${"x".repeat(128)}\"}")
+        }
+        application {
+            module(
+                catalogManager = catalogManager(oversized),
+                config = BridgeConfig(
+                    security = SecurityConfig(maxResponseBytes = 64),
+                ),
+            )
+        }
+
+        assertEquals(HttpStatusCode.BadGateway, client.get("/api/manual?wd=query").status)
+    }
+
     @Test
     fun `api list exposes ready manual entries from the active catalog`() = testApplication {
         val runtime = ContractSpiderRuntime("manual", "Manual")
@@ -230,7 +297,7 @@ private fun readyEntry(runtime: SpiderRuntime): RuntimeEntry = RuntimeEntry(
     handler = SourceHandler.Spider(runtime),
 )
 
-private class ContractSpiderRuntime(
+private open class ContractSpiderRuntime(
     override val key: String,
     override val name: String,
 ) : SpiderRuntime {
