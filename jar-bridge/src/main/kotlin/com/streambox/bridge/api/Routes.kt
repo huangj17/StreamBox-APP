@@ -4,12 +4,9 @@ import com.streambox.bridge.catalog.CatalogManager
 import com.streambox.bridge.catalog.SourceHandler
 import com.streambox.bridge.cms.CmsProxyException
 import com.streambox.bridge.cms.CmsProxyService
-import com.streambox.bridge.config.BridgeConfig
 import com.streambox.bridge.spider.SpiderManager
 import com.streambox.bridge.spider.SpiderTimeoutException
 import com.streambox.bridge.spider.SpiderUnavailableException
-import com.streambox.bridge.sync.SyncCoordinator
-import com.streambox.bridge.sync.SyncStartResult
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -21,8 +18,6 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
-import java.security.MessageDigest
-import java.time.Instant
 import java.util.Base64
 
 private val json = Json { prettyPrint = false }
@@ -55,13 +50,9 @@ data class ApiListResponse(
 fun Application.configureRoutes(
     manager: SpiderManager,
     catalogManager: CatalogManager,
-    syncCoordinator: SyncCoordinator? = null,
-    config: BridgeConfig = BridgeConfig(),
-    environment: Map<String, String> = System.getenv(),
     cmsProxyService: CmsProxyService = CmsProxyService(),
 ) {
     startTime = System.currentTimeMillis()
-    val adminRateLimiter = AdminRateLimiter()
     monitor.subscribe(ApplicationStopped) { cmsProxyService.close() }
 
     routing {
@@ -82,10 +73,7 @@ fun Application.configureRoutes(
                     ApiListResponse(
                         code = 200,
                         catalogVersion = catalogManager.current().version,
-                        stale = syncCoordinator?.status()?.isStale(
-                            Instant.now(),
-                            config.aggregator.syncInterval,
-                        ) ?: false,
+                        stale = false,
                         sources = sources,
                     ),
                 ),
@@ -96,66 +84,11 @@ fun Application.configureRoutes(
         // 健康检查
         get("/health") {
             val hasEntries = catalogManager.listPublic().isNotEmpty()
-            val stale = syncCoordinator?.status()?.isStale(
-                Instant.now(),
-                config.aggregator.syncInterval,
-            ) ?: false
-            val health = when {
-                !hasEntries -> "error"
-                stale || (syncCoordinator?.status()?.consecutiveFailures ?: 0) > 0 -> "degraded"
-                else -> "ok"
-            }
+            val health = if (hasEntries) "ok" else "error"
             call.respondText(
-                buildHealthJson(manager, catalogManager, syncCoordinator, health, stale),
+                buildHealthJson(manager, catalogManager, health),
                 ContentType.Application.Json,
                 if (health == "error") HttpStatusCode.ServiceUnavailable else HttpStatusCode.OK,
-            )
-        }
-
-        get("/sync/status") {
-            val coordinator = syncCoordinator
-                ?: return@get call.respondApiError(
-                    HttpStatusCode.Conflict,
-                    "AGGREGATOR_NOT_CONFIGURED",
-                    "Aggregator synchronization is not configured",
-                )
-            call.respondText(
-                json.encodeToString(coordinator.status()),
-                ContentType.Application.Json,
-            )
-        }
-
-        post("/admin/sync") {
-            val coordinator = syncCoordinator
-                ?: return@post call.respondApiError(
-                    HttpStatusCode.Conflict,
-                    "AGGREGATOR_NOT_CONFIGURED",
-                    "Aggregator synchronization is not configured",
-                )
-            if (!config.admin.enabled || !authorizedAdmin(call, config, environment)) {
-                return@post call.respondApiError(
-                    HttpStatusCode.Unauthorized,
-                    "UNAUTHORIZED",
-                    "Admin authorization failed",
-                )
-            }
-            if (!adminRateLimiter.tryAcquire()) {
-                return@post call.respondApiError(
-                    HttpStatusCode.TooManyRequests,
-                    "RATE_LIMITED",
-                    "Admin sync rate limit exceeded",
-                )
-            }
-            val allowEmpty = call.receiveText().contains(Regex("\"allowEmpty\"\\s*:\\s*true"))
-            val result = coordinator.startAsync(allowEmpty = allowEmpty)
-            val (jobId, alreadyRunning) = when (result) {
-                is SyncStartResult.AlreadyRunning -> result.jobId to true
-                is SyncStartResult.Started -> result.jobId to false
-            }
-            call.respondText(
-                """{"jobId":"$jobId","alreadyRunning":$alreadyRunning}""",
-                ContentType.Application.Json,
-                HttpStatusCode.Accepted,
             )
         }
 
@@ -333,23 +266,6 @@ fun Application.configureRoutes(
     }
 }
 
-private class AdminRateLimiter(
-    private val limit: Int = 6,
-    private val windowMs: Long = 60_000,
-) {
-    private val lock = Any()
-    private val attempts = ArrayDeque<Long>()
-
-    fun tryAcquire(nowMs: Long = System.currentTimeMillis()): Boolean = synchronized(lock) {
-        while (attempts.firstOrNull()?.let { nowMs - it >= windowMs } == true) {
-            attempts.removeFirst()
-        }
-        if (attempts.size >= limit) return@synchronized false
-        attempts.addLast(nowMs)
-        true
-    }
-}
-
 @Serializable
 private data class CmsPlayResponse(
     val parse: Int,
@@ -449,26 +365,10 @@ private suspend fun ApplicationCall.respondApiError(
     )
 }
 
-private fun authorizedAdmin(
-    call: ApplicationCall,
-    config: BridgeConfig,
-    environment: Map<String, String>,
-): Boolean {
-    val expected = environment[config.admin.tokenEnv]?.toByteArray(Charsets.UTF_8) ?: return false
-    val supplied = call.request.headers[HttpHeaders.Authorization]
-        ?.removePrefix("Bearer ")
-        ?.takeIf { it != call.request.headers[HttpHeaders.Authorization] }
-        ?.toByteArray(Charsets.UTF_8)
-        ?: return false
-    return MessageDigest.isEqual(expected, supplied)
-}
-
 private fun buildHealthJson(
     manager: SpiderManager,
     catalogManager: CatalogManager,
-    syncCoordinator: SyncCoordinator?,
     health: String,
-    stale: Boolean,
 ): String {
     val uptimeMs = System.currentTimeMillis() - startTime
     val uptimeStr = formatUptime(uptimeMs)
@@ -488,20 +388,8 @@ private fun buildHealthJson(
     val ready = catalog.entries.values.count { it.status.name == "READY" }
     val degraded = catalog.entries.values.count { it.status.name == "DEGRADED" }
     val failed = catalog.entries.values.count { it.status.name == "FAILED" }
-    val sync = syncCoordinator?.status()
-    val aggregatorStatus = when {
-        syncCoordinator == null -> "disabled"
-        (sync?.consecutiveFailures ?: 0) > 0 -> "unreachable"
-        else -> "ok"
-    }
-    return """{"status":"$health","version":"2.0.0","uptime":"$uptimeStr","catalog":{"version":"${catalog.version}","stale":$stale,"ready":$ready,"degraded":$degraded,"failed":$failed},"aggregator":{"status":"$aggregatorStatus","lastAttemptAt":${jsonString(sync?.lastAttemptAt)},"lastSuccessAt":${jsonString(sync?.lastSuccessAt)},"consecutiveFailures":${sync?.consecutiveFailures ?: 0}},"plugins":{"loaded":${manager.loadedCount()},"unavailable":${manager.failedCount()},"details":[${details.joinToString(",")}]}}"""
+    return """{"status":"$health","version":"2.0.0","uptime":"$uptimeStr","catalog":{"version":"${catalog.version}","stale":false,"ready":$ready,"degraded":$degraded,"failed":$failed},"plugins":{"loaded":${manager.loadedCount()},"unavailable":${manager.failedCount()},"details":[${details.joinToString(",")}]}}"""
 }
-
-private fun jsonString(value: String?): String = value
-    ?.replace("\\", "\\\\")
-    ?.replace("\"", "\\\"")
-    ?.let { "\"$it\"" }
-    ?: "null"
 
 private fun formatUptime(ms: Long): String {
     val seconds = ms / 1000

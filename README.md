@@ -20,16 +20,14 @@ Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。本�
 ## 架构关系
 
 ```
-TVBox Source Aggregator --HTTP--┐
-                               v
-StreamBox (Flutter) --HTTP--> StreamBox Gateway --CMS/Spider--> 内容站点
+StreamBox (Flutter) --HTTP--> StreamBox Gateway --Spider--> 内容站点
                                |
                                v
-                         data/ + plugins/*.jar
+                    config.yml + plugins/*.jar
 ```
 
-- 客户端只需配置 Gateway 地址，通过 `/api/list` 发现 CMS、自动 JAR 和手工 JAR
-- Gateway 与 Aggregator 独立部署，Aggregator 仅提供配置，不执行 Spider
+- Gateway 属于 StreamBox 本项目，通过 `/api/list` 发现手工配置的 JAR 片源
+- Gateway 不自带片源，需要自行准备 Spider JAR 并写入 `config.yml`
 - 每个 source 的 API 格式与苹果 CMS 完全兼容（`ac=class`、`ac=detail`、`wd=` 等）
 - Gateway 是可选组件，StreamBox 在没有 Gateway 时仍可直接使用 CMS 源
 - 客户端默认连接 `http://localhost:9978`

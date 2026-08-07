@@ -24,11 +24,11 @@ class RemoteTargetPolicyTest {
     @Test
     fun `explicit private host allowlist permits compose service targets`() {
         val policy = RemoteTargetPolicy(
-            allowedPrivateHosts = setOf("aggregator"),
+            allowedPrivateHosts = setOf("cms.internal"),
             resolver = HostResolver { listOf(InetAddress.getByName("172.18.0.2")) },
         )
 
-        policy.validate("http://aggregator:5678/config".toHttpUrl())
+        policy.validate("http://cms.internal:8080/api.php".toHttpUrl())
     }
 
     @Test

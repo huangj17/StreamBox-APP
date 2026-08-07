@@ -3,22 +3,21 @@ info:
   title: StreamBox Gateway API
   version: 2.0.0
   description: |
-    StreamBox Gateway 将手工 JAR、Aggregator CMS 与自动 JAR 统一暴露为苹果 CMS 兼容 API。
-    Gateway 与 TVBox Source Aggregator 独立部署，仅通过 HTTP 集成。
+    StreamBox Gateway 将本地配置的 Spider JAR 暴露为苹果 CMS 兼容 API。
+    Gateway 是可选组件；Flutter 客户端也可以直接连接普通 CMS 源。
 servers:
   - url: http://localhost:9978
 tags:
   - name: Gateway
   - name: Content
-  - name: Sync
 paths:
   /api/list:
     get:
       tags: [Gateway]
-      summary: 发现公开且可用的 Gateway source
+      summary: 发现公开且可用的 Gateway 片源
       responses:
         "200":
-          description: v1 字段保持兼容的统一目录
+          description: 手工配置的可用片源目录
           content:
             application/json:
               schema:
@@ -26,74 +25,24 @@ paths:
   /health:
     get:
       tags: [Gateway]
-      summary: Gateway、目录、Aggregator 与手工插件健康状态
+      summary: Gateway、目录与手工插件健康状态
       responses:
         "200":
-          description: ok 或 degraded
+          description: 至少存在一个公开片源
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
         "503":
-          description: 活动目录为空
+          description: 公开片源目录为空
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
-  /sync/status:
-    get:
-      tags: [Sync]
-      summary: 读取脱敏的 Aggregator 同步状态
-      responses:
-        "200":
-          description: 同步状态
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SyncStatus"
-        "409":
-          description: Aggregator 未配置
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /admin/sync:
-    post:
-      tags: [Sync]
-      summary: 触发一次单飞同步
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                allowEmpty:
-                  type: boolean
-                  default: false
-      responses:
-        "202":
-          description: 后台同步已启动，或返回当前正在运行的同步 job
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [jobId, alreadyRunning]
-                properties:
-                  jobId: {type: string}
-                  alreadyRunning: {type: boolean}
-        "401":
-          description: Bearer Token 无效
-        "409":
-          description: Aggregator 未配置
-        "429":
-          description: 管理接口速率限制
   /api/{key}:
     get:
       tags: [Content]
-      summary: CMS/JAR 统一内容接口
+      summary: JAR 片源内容接口
       parameters:
         - {name: key, in: path, required: true, schema: {type: string}}
         - {name: ac, in: query, schema: {type: string, enum: [class, detail]}}
@@ -103,19 +52,19 @@ paths:
         - {name: wd, in: query, schema: {type: string}}
       responses:
         "200":
-          description: 苹果 CMS JSON
+          description: 苹果 CMS 兼容 JSON
           content:
             application/json:
               schema: {type: object, additionalProperties: true}
         "400": {description: BAD_QUERY}
         "404": {description: SOURCE_NOT_FOUND}
-        "502": {description: UPSTREAM_INVALID_JSON 或 UPSTREAM_HTTP_ERROR}
-        "503": {description: SOURCE_UNAVAILABLE 或 SOURCE_BUSY}
-        "504": {description: UPSTREAM_TIMEOUT 或 Spider timeout}
+        "502": {description: 插件返回非法 JSON}
+        "503": {description: SOURCE_UNAVAILABLE}
+        "504": {description: Spider 调用超时}
   /api/{key}/play:
     get:
       tags: [Content]
-      summary: JAR playerContent 或 CMS 直接播放地址
+      summary: JAR playerContent 播放地址解析
       parameters:
         - {name: key, in: path, required: true, schema: {type: string}}
         - {name: flag, in: query, schema: {type: string}}
@@ -130,19 +79,15 @@ paths:
         "400": {description: BAD_QUERY 或 PLAY_RESOLUTION_UNSUPPORTED}
         "404": {description: SOURCE_NOT_FOUND}
 components:
-  securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
   schemas:
     Source:
       type: object
       required: [key, name, api, kind, status, searchable]
       properties:
-        key: {type: string, example: agg_cms_a}
-        name: {type: string, example: CMS A}
-        api: {type: string, example: /api/agg_cms_a}
-        kind: {type: string, enum: [cms, jar, manual]}
+        key: {type: string, example: jianpian}
+        name: {type: string, example: 荐片视频}
+        api: {type: string, example: /api/jianpian}
+        kind: {type: string, enum: [manual]}
         status: {type: string, enum: [ready, degraded]}
         searchable: {type: boolean}
     ListResponse:
@@ -150,50 +95,23 @@ components:
       required: [code, catalogVersion, stale, sources]
       properties:
         code: {type: integer, example: 200}
-        catalogVersion: {type: string, example: 20260804T120000Z-a1b2c3d4}
-        stale: {type: boolean}
+        catalogVersion: {type: string, example: manual-1786089600000}
+        stale:
+          type: boolean
+          description: 兼容保留字段，手工模式固定为 false
+          example: false
         sources:
           type: array
           items: {$ref: "#/components/schemas/Source"}
     HealthResponse:
       type: object
-      required: [status, version, uptime, catalog, aggregator, plugins]
+      required: [status, version, uptime, catalog, plugins]
       properties:
-        status: {type: string, enum: [ok, degraded, error]}
+        status: {type: string, enum: [ok, error]}
         version: {type: string, example: 2.0.0}
         uptime: {type: string}
         catalog: {type: object, additionalProperties: true}
-        aggregator: {type: object, additionalProperties: true}
         plugins: {type: object, additionalProperties: true}
-    SyncStatus:
-      type: object
-      required: [phase, running, consecutiveFailures, diff]
-      properties:
-        jobId: {type: string, nullable: true}
-        phase: {type: string}
-        running: {type: boolean}
-        lastAttemptAt: {type: string, format: date-time, nullable: true}
-        lastSuccessAt: {type: string, format: date-time, nullable: true}
-        consecutiveFailures: {type: integer}
-        lastErrorCode: {type: string, nullable: true}
-        lastErrorMessage: {type: string, nullable: true}
-        durationMs: {type: integer, format: int64, nullable: true}
-        configDigest: {type: string, nullable: true}
-        currentCatalogVersion: {type: string, nullable: true}
-        diff: {$ref: "#/components/schemas/SyncDiff"}
-        nextAttemptAt: {type: string, format: date-time, nullable: true}
-        etag: {type: string, nullable: true}
-        lastModified: {type: string, nullable: true}
-    SyncDiff:
-      type: object
-      required: [added, updated, removed, unchanged, failed, shadowed]
-      properties:
-        added: {type: integer}
-        updated: {type: integer}
-        removed: {type: integer}
-        unchanged: {type: integer}
-        failed: {type: integer}
-        shadowed: {type: integer}
     PlayResponse:
       type: object
       required: [parse, url, header]

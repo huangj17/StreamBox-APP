@@ -9,24 +9,12 @@ import com.streambox.bridge.catalog.SourceHandler
 import com.streambox.bridge.catalog.SourceKind
 import com.streambox.bridge.catalog.SourceOrigin
 import com.streambox.bridge.catalog.SpiderRuntime
-import com.streambox.bridge.config.AdminConfig
-import com.streambox.bridge.config.BridgeConfig
-import com.streambox.bridge.aggregator.AggregatorFetchResult
-import com.streambox.bridge.aggregator.AggregatorSource
-import com.streambox.bridge.aggregator.FetchValidators
 import com.streambox.bridge.module
-import com.streambox.bridge.storage.CatalogSnapshotStore
-import com.streambox.bridge.sync.SyncCoordinator
 import com.sun.net.httpserver.HttpServer
 import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -35,7 +23,6 @@ import java.time.Instant
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.util.HashMap
-import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -169,7 +156,7 @@ class RoutesContractTest {
                         key = "cms",
                         name = "CMS",
                         kind = SourceKind.CMS,
-                        origin = SourceOrigin.AGGREGATOR,
+                        origin = SourceOrigin.CONFIG_YAML,
                         api = "http://127.0.0.1:${server.address.port}/api.php",
                         specFingerprint = "cms-v1",
                     ),
@@ -213,98 +200,6 @@ class RoutesContractTest {
         }
     }
 
-    @Test
-    fun `sync status is public and admin sync requires the configured bearer token`() =
-        testApplication {
-            val source = CountingAggregatorSource()
-            val manager = CatalogManager()
-            val coordinator = SyncCoordinator(
-                source = source,
-                catalogManager = manager,
-                snapshotStore = CatalogSnapshotStore(createTempDirectory("route-sync-test")),
-                manualCatalog = ActiveCatalog.empty(),
-                aggregatorBaseUrl = "https://aggregator.example/config.json",
-            )
-            application {
-                module(
-                    catalogManager = manager,
-                    syncCoordinator = coordinator,
-                    config = BridgeConfig(admin = AdminConfig(enabled = true, tokenEnv = "ADMIN")),
-                    environment = mapOf("ADMIN" to "secret-token"),
-                )
-            }
-
-            assertEquals(HttpStatusCode.OK, client.get("/sync/status").status)
-            assertEquals(HttpStatusCode.Unauthorized, client.post("/admin/sync").status)
-            val authorized = client.post("/admin/sync") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                setBody("{\"allowEmpty\":false}")
-            }
-
-            assertEquals(HttpStatusCode.Accepted, authorized.status)
-            assertEquals(1, source.fetchCount)
-
-            repeat(5) {
-                assertEquals(
-                    HttpStatusCode.Accepted,
-                    client.post("/admin/sync") {
-                        header(HttpHeaders.Authorization, "Bearer secret-token")
-                        setBody("{\"allowEmpty\":false}")
-                    }.status,
-                )
-            }
-            assertEquals(
-                HttpStatusCode.TooManyRequests,
-                client.post("/admin/sync") {
-                    header(HttpHeaders.Authorization, "Bearer secret-token")
-                    setBody("{\"allowEmpty\":false}")
-                }.status,
-            )
-        }
-
-    @Test
-    fun `admin sync returns before fetch completes and reuses the running job`() =
-        testApplication {
-            val source = RouteBlockingAggregatorSource()
-            val manager = CatalogManager()
-            val coordinator = SyncCoordinator(
-                source = source,
-                catalogManager = manager,
-                snapshotStore = CatalogSnapshotStore(createTempDirectory("route-async-sync")),
-                manualCatalog = ActiveCatalog.empty(),
-                aggregatorBaseUrl = "https://aggregator.example/config.json",
-            )
-            application {
-                module(
-                    catalogManager = manager,
-                    syncCoordinator = coordinator,
-                    config = BridgeConfig(admin = AdminConfig(enabled = true, tokenEnv = "ADMIN")),
-                    environment = mapOf("ADMIN" to "secret-token"),
-                )
-            }
-
-            val first = client.post("/admin/sync") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                setBody("{\"allowEmpty\":false}")
-            }
-            assertEquals(HttpStatusCode.Accepted, first.status)
-            source.started.await()
-            val firstBody = Json.parseToJsonElement(first.bodyAsText()).jsonObject
-
-            val duplicate = client.post("/admin/sync") {
-                header(HttpHeaders.Authorization, "Bearer secret-token")
-                setBody("{\"allowEmpty\":false}")
-            }
-            val duplicateBody = Json.parseToJsonElement(duplicate.bodyAsText()).jsonObject
-
-            assertEquals(HttpStatusCode.Accepted, duplicate.status)
-            assertEquals("true", duplicateBody.getValue("alreadyRunning").jsonPrimitive.content)
-            assertEquals(
-                firstBody.getValue("jobId").jsonPrimitive.content,
-                duplicateBody.getValue("jobId").jsonPrimitive.content,
-            )
-            source.release.complete(Unit)
-        }
 }
 
 private fun routeMarker(body: String): String = Json
@@ -367,34 +262,5 @@ private class ContractSpiderRuntime(
 
     override fun close() {
         closeCount += 1
-    }
-}
-
-private class CountingAggregatorSource : AggregatorSource {
-    var fetchCount: Int = 0
-        private set
-
-    override suspend fun fetch(previous: FetchValidators?): AggregatorFetchResult {
-        fetchCount += 1
-        return AggregatorFetchResult.Fetched(
-            body = "{\"sites\":[]}",
-            finalUrl = "https://aggregator.example/config.json",
-            validators = FetchValidators(),
-        )
-    }
-}
-
-private class RouteBlockingAggregatorSource : AggregatorSource {
-    val started = CompletableDeferred<Unit>()
-    val release = CompletableDeferred<Unit>()
-
-    override suspend fun fetch(previous: FetchValidators?): AggregatorFetchResult {
-        started.complete(Unit)
-        release.await()
-        return AggregatorFetchResult.Fetched(
-            body = "{\"sites\":[{\"key\":\"cms\",\"api\":\"https://cms.example/api.php\"}]}",
-            finalUrl = "https://aggregator.example/config.json",
-            validators = FetchValidators(),
-        )
     }
 }

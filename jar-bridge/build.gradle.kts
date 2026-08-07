@@ -31,7 +31,7 @@ dependencies {
     implementation("io.ktor:ktor-server-swagger:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
 
-    // Explicitly pinned because catalog/sync lifecycles use coroutines directly.
+    // Spider、CMS 和图片代理调用使用协程隔离阻塞 I/O。
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
 
     // JSON

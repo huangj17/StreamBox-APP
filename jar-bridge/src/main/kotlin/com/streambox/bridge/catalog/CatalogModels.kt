@@ -14,7 +14,6 @@ enum class SourceKind {
 
 @Serializable
 enum class SourceOrigin {
-    AGGREGATOR,
     CONFIG_YAML,
 }
 

@@ -7,38 +7,12 @@ server:
 timeout: 15000
 logLevel: INFO
 
-# v2 默认保持 manual，未配置 Aggregator 时行为与 v1 一致。
-aggregator:
-  enabled: false
-  baseUrl: "http://aggregator:5678"
-  tokenEnv: "AGGREGATOR_TOKEN"
-  headersFromEnv: {}
-  syncInterval: "PT15M"
-  connectTimeout: 5000
-  readTimeout: 15000
-  maxResponseBytes: 10485760
-
 catalog:
-  mode: "manual" # manual | aggregator | hybrid
-  snapshotRetention: 2
   retirementGraceMs: 30000
-  allowEmpty: false
-
-artifacts:
-  maxJarBytes: 104857600
-  cacheMaxBytes: 2147483648
-  downloadConcurrency: 4
-  maxZipEntries: 50000
 
 security:
-  secretKeyEnv: "BRIDGE_SECRET_KEY"
-  allowedPrivateHosts:
-    - "aggregator"
+  allowedPrivateHosts: []
   allowedPrivateCidrs: []
-
-admin:
-  enabled: false
-  tokenEnv: "BRIDGE_ADMIN_TOKEN"
 
 # 插件列表（已验证可用，顺序即优先级）
 plugins:
