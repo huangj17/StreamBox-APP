@@ -85,16 +85,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (selectedUrl != null) {
       ref.read(selectedSourceUrlProvider.notifier).state = selectedUrl;
       try {
-        // 检测是否多仓，恢复上次选中的仓库
-        final warehouses = await ref.read(warehouseListProvider.future);
-        if (warehouses.isNotEmpty) {
+        var config = await ref.read(sourceConfigProvider.future);
+        if (config == null) {
+          // 多仓在选择具体仓库前没有最终配置。
+          final warehouses = await ref.read(warehouseListProvider.future);
           final lastWh = storage.getSelectedWarehouse(selectedUrl);
           if (lastWh != null && warehouses.any((w) => w.url == lastWh)) {
             ref.read(selectedWarehouseUrlProvider.notifier).state = lastWh;
+            config = await ref.read(sourceConfigProvider.future);
           }
         }
-        await ref.read(sourceConfigProvider.future);
-        if (mounted) {
+        if (mounted && config != null) {
           syncSitesToHome(ref);
           // Bridge 源：恢复上次选中的插件（全部 sites → 单个 plugin site）
           if (selectedUrl.contains(':9978')) {
@@ -110,8 +111,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             }
           }
         }
-      } catch (_) {
-        // 解析失败时静默忽略，用户可在管理页重试
+      } catch (error) {
+        debugPrint('恢复配置源失败: $error');
       }
     }
 
@@ -198,7 +199,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           'category': detail.vodClass,
         },
       );
-    } catch (_) {
+    } catch (error) {
+      debugPrint('直接播放失败，回退详情页: $error');
       if (mounted) _navigateToDetail(video);
     }
   }
@@ -579,9 +581,12 @@ class _CategoryRailWrapper extends ConsumerWidget {
 
     // 找到该分类所属的 Site
     Site? site;
-    try {
-      site = sites.firstWhere((s) => s.key == category.siteKey);
-    } catch (_) {}
+    for (final candidate in sites) {
+      if (candidate.key == category.siteKey) {
+        site = candidate;
+        break;
+      }
+    }
 
     return CategoryRail(
       category: category,

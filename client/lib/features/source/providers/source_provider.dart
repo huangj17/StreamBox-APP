@@ -31,6 +31,19 @@ final selectedWarehouseUrlProvider = StateProvider<String?>((ref) => null);
 
 // ── 多仓解析 ──
 
+/// 当前普通配置 URL 的单次解析结果。仓库列表和单仓配置共享这个 Future，
+/// 避免先判多仓、再解析单仓时把同一文档下载两次。
+final sourceDocumentProvider = FutureProvider<ParsedSourceDocument?>((
+  ref,
+) async {
+  final url = ref.watch(selectedSourceUrlProvider);
+  if (url == null || url.isEmpty) return null;
+  if (SourceParser.isCmsApiUrl(url) || SourceParser.isJarBridgeUrl(url)) {
+    return null;
+  }
+  return ref.read(sourceParserProvider).parseDocument(url);
+});
+
 /// 多仓解析结果：如果当前选中源是多仓，返回仓库列表；否则返回空列表
 final warehouseListProvider = FutureProvider<List<Warehouse>>((ref) async {
   final url = ref.watch(selectedSourceUrlProvider);
@@ -38,8 +51,8 @@ final warehouseListProvider = FutureProvider<List<Warehouse>>((ref) async {
   if (SourceParser.isCmsApiUrl(url)) return [];
   if (SourceParser.isJarBridgeUrl(url)) return [];
 
-  final parser = ref.read(sourceParserProvider);
-  return await parser.parseMultiWarehouse(url) ?? [];
+  final document = await ref.watch(sourceDocumentProvider.future);
+  return document?.warehouses ?? [];
 });
 
 // ── 配置源解析 ──
@@ -84,12 +97,16 @@ final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
     return SourceParser.wrapCmsUrl(url);
   }
 
-  // 任意域名、端口或 HTTPS Gateway 均通过短超时 Schema 探测识别。
-  final gateway = await parser.probeGateway(url);
-  if (gateway != null) return gateway;
+  // 明确 Bridge 或无路径 HTTPS 根地址才探测 Gateway Schema。普通配置文件
+  // 路径直接解析，避免无意义的 /api/list 请求。
+  if (SourceParser.shouldProbeGateway(url)) {
+    final gateway = await parser.probeGateway(url);
+    if (gateway != null) return gateway;
+  }
 
-  // 检查是否多仓
-  final warehouses = await ref.watch(warehouseListProvider.future);
+  // 单仓/多仓共享同一份已下载文档。
+  final document = await ref.watch(sourceDocumentProvider.future);
+  final warehouses = document?.warehouses ?? [];
   if (warehouses.isNotEmpty) {
     // 多仓：等待用户选择仓库
     final whUrl = ref.watch(selectedWarehouseUrlProvider);
@@ -103,7 +120,7 @@ final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
   }
 
   // 单仓：直接解析
-  return parser.parse(url);
+  return document?.config;
 });
 
 /// 当前可用的站点列表（CMS 站点 + Bridge 站点）

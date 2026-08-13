@@ -36,6 +36,10 @@ void main() {
         UrlPolicy.requirePlaybackUrl('https://media.example/video.m3u8').host,
         'media.example',
       );
+      expect(
+        UrlPolicy.requirePlaybackUrl('http://media.example/video.m3u8').host,
+        'media.example',
+      );
     });
 
     test('unsafe CMS sites from remote configuration are filtered out', () {

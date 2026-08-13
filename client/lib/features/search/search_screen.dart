@@ -128,84 +128,96 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           title: const Text('搜索'),
         ),
         body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── 搜索栏 ──
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              hPad, AppSpacing.md, hPad, AppSpacing.md,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    autofocus: !_hasSearched,
-                    decoration: InputDecoration(
-                      hintText: '输入影片名称...',
-                      hintStyle:
-                          AppTypography.body.copyWith(color: AppColors.hintText),
-                      prefixIcon: const Icon(Icons.search,
-                          color: AppColors.hintText),
-                      suffixIcon: _hasSearched
-                          ? IconButton(
-                              icon: const Icon(Icons.close,
-                                  color: AppColors.hintText, size: 18),
-                              onPressed: _clearSearch,
-                            )
-                          : null,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            const BorderSide(color: AppColors.divider),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide:
-                            const BorderSide(color: AppColors.divider),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(
-                          color: AppColors.netflixRed,
-                          width: 2,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── 搜索栏 ──
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                hPad,
+                AppSpacing.md,
+                hPad,
+                AppSpacing.md,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      autofocus: !_hasSearched,
+                      decoration: InputDecoration(
+                        hintText: '输入影片名称...',
+                        hintStyle: AppTypography.body.copyWith(
+                          color: AppColors.hintText,
                         ),
+                        prefixIcon: const Icon(
+                          Icons.search,
+                          color: AppColors.hintText,
+                        ),
+                        suffixIcon: _hasSearched
+                            ? IconButton(
+                                icon: const Icon(
+                                  Icons.close,
+                                  color: AppColors.hintText,
+                                  size: 18,
+                                ),
+                                onPressed: _clearSearch,
+                              )
+                            : null,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                            color: AppColors.divider,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                            color: AppColors.divider,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                            color: AppColors.netflixRed,
+                            width: 2,
+                          ),
+                        ),
+                        filled: true,
+                        fillColor: AppColors.cardBackground,
+                        isDense: true,
                       ),
-                      filled: true,
-                      fillColor: AppColors.cardBackground,
-                      isDense: true,
+                      style: AppTypography.body.copyWith(
+                        color: AppColors.primaryText,
+                      ),
+                      onSubmitted: (_) => _search(),
                     ),
-                    style: AppTypography.body
-                        .copyWith(color: AppColors.primaryText),
-                    onSubmitted: (_) => _search(),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                TvActionButton.primary(
-                  icon: Icons.search,
-                  label: '搜索',
-                  compact: true,
-                  debugLabel: 'search-submit',
-                  onActivate: _search,
-                ),
-              ],
+                  const SizedBox(width: AppSpacing.md),
+                  TvActionButton.primary(
+                    icon: Icons.search,
+                    label: '搜索',
+                    compact: true,
+                    debugLabel: 'search-submit',
+                    onActivate: _search,
+                  ),
+                ],
+              ),
             ),
-          ),
 
-          // ── 内容区 ──
-          Expanded(
-            child: _hasSearched
-                ? _buildResults(results, hPad)
-                : _SearchHome(
-                    onKeywordTap: _search,
-                    onVideoTap: _navigateToDetail,
-                    onTopRowUp: () => _focusNode.requestFocus(),
-                    hPad: hPad,
-                  ),
-          ),
-        ],
-      ),
+            // ── 内容区 ──
+            Expanded(
+              child: _hasSearched
+                  ? _buildResults(results, hPad)
+                  : _SearchHome(
+                      onKeywordTap: _search,
+                      onVideoTap: _navigateToDetail,
+                      onTopRowUp: () => _focusNode.requestFocus(),
+                      hPad: hPad,
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -241,10 +253,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  '未找到「${_controller.text}」相关内容',
-                  style: AppTypography.body,
-                ),
+                Text('未找到「${_controller.text}」相关内容', style: AppTypography.body),
                 const SizedBox(height: AppSpacing.md),
                 TvActionButton.secondary(
                   icon: Icons.refresh,
@@ -297,9 +306,7 @@ class _SearchHome extends ConsumerWidget {
     return FocusTraversalGroup(
       policy: WidgetOrderTraversalPolicy(),
       child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(
-          hPad, AppSpacing.sm, hPad, AppSpacing.xxl,
-        ),
+        padding: EdgeInsets.fromLTRB(hPad, AppSpacing.sm, hPad, AppSpacing.xxl),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -325,16 +332,16 @@ class _SearchHome extends ConsumerWidget {
                 spacing: AppSpacing.sm,
                 runSpacing: AppSpacing.sm,
                 children: history
-                    .map((kw) => _HistoryChip(
-                          label: kw,
-                          onTap: () => onKeywordTap(kw),
-                          onDelete: () {
-                            ref
-                                .read(searchHistoryStorageProvider)
-                                .remove(kw);
-                            ref.invalidate(searchHistoryProvider);
-                          },
-                        ))
+                    .map(
+                      (kw) => _HistoryChip(
+                        label: kw,
+                        onTap: () => onKeywordTap(kw),
+                        onDelete: () {
+                          ref.read(searchHistoryStorageProvider).remove(kw);
+                          ref.invalidate(searchHistoryProvider);
+                        },
+                      ),
+                    )
                     .toList(),
               ),
               const SizedBox(height: AppSpacing.lg),
@@ -347,8 +354,7 @@ class _SearchHome extends ConsumerWidget {
               loading: () => const Padding(
                 padding: EdgeInsets.only(top: AppSpacing.xxl),
                 child: Center(
-                  child:
-                      CircularProgressIndicator(color: AppColors.netflixRed),
+                  child: CircularProgressIndicator(color: AppColors.netflixRed),
                 ),
               ),
               error: (_, _) => _EmptyAction(
@@ -476,9 +482,7 @@ class _HistoryChip extends StatelessWidget {
               Icon(
                 Icons.close,
                 size: 14,
-                color: focused
-                    ? AppColors.primaryText
-                    : AppColors.hintText,
+                color: focused ? AppColors.primaryText : AppColors.hintText,
               ),
             ],
           ),
@@ -510,7 +514,8 @@ class _LatestGrid extends StatelessWidget {
     );
     final spacing = AppSpacing.md;
     final cardWidth = (width - spacing * (crossAxisCount - 1)) / crossAxisCount;
-    final cardHeight = cardWidth * (AppSpacing.cardHeight / AppSpacing.cardWidth);
+    final cardHeight =
+        cardWidth * (AppSpacing.cardHeight / AppSpacing.cardWidth);
 
     return Wrap(
       spacing: spacing,
@@ -554,9 +559,7 @@ class _ResultGrid extends StatelessWidget {
     final crossAxisCount = AppSpacing.gridColumns(width);
 
     return GridView.builder(
-      padding: EdgeInsets.fromLTRB(
-        hPad, AppSpacing.lg, hPad, AppSpacing.xxl,
-      ),
+      padding: EdgeInsets.fromLTRB(hPad, AppSpacing.lg, hPad, AppSpacing.xxl),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
         childAspectRatio: AppSpacing.cardWidth / AppSpacing.cardHeight,

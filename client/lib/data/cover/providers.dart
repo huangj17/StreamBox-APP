@@ -13,19 +13,19 @@ import 'tmdb_cover_resolver.dart';
 
 /// 应用级设置存储（TMDB API key 等），由 main.dart 注入实际实例
 final appSettingsStorageProvider = Provider<AppSettingsStorage>(
-  (ref) => throw UnimplementedError(
-      'appSettingsStorageProvider must be overridden'),
+  (ref) =>
+      throw UnimplementedError('appSettingsStorageProvider must be overridden'),
 );
 
 /// 封面查询缓存，由 main.dart 注入实际实例
 final coverCacheProvider = Provider<CoverCache>(
-  (ref) =>
-      throw UnimplementedError('coverCacheProvider must be overridden'),
+  (ref) => throw UnimplementedError('coverCacheProvider must be overridden'),
 );
 
 /// 全局封面查询并发池（最多 3 个并发请求）
-final coverFetchPoolProvider =
-    Provider<FetchPool>((ref) => FetchPool(maxConcurrent: 3));
+final coverFetchPoolProvider = Provider<FetchPool>(
+  (ref) => FetchPool(maxConcurrent: 3),
+);
 
 /// 缓存版本号。每次用户「清除封面缓存」时 +1，已挂载的
 /// ResolvableCover 监听此值重置状态并重新触发解析。

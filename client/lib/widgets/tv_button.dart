@@ -50,19 +50,18 @@ class TvActionButton extends StatelessWidget {
     bool autofocus = false,
     String? debugLabel,
     VoidCallback? onLongActivate,
-  }) =>
-      TvActionButton(
-        key: key,
-        icon: icon,
-        label: label,
-        onActivate: onActivate,
-        compact: compact,
-        autofocus: autofocus,
-        background: Colors.white,
-        foreground: Colors.black,
-        debugLabel: debugLabel,
-        onLongActivate: onLongActivate,
-      );
+  }) => TvActionButton(
+    key: key,
+    icon: icon,
+    label: label,
+    onActivate: onActivate,
+    compact: compact,
+    autofocus: autofocus,
+    background: Colors.white,
+    foreground: Colors.black,
+    debugLabel: debugLabel,
+    onLongActivate: onLongActivate,
+  );
 
   /// 次操作（半透灰底白字）
   factory TvActionButton.secondary({
@@ -74,19 +73,18 @@ class TvActionButton extends StatelessWidget {
     bool autofocus = false,
     String? debugLabel,
     VoidCallback? onLongActivate,
-  }) =>
-      TvActionButton(
-        key: key,
-        icon: icon,
-        label: label,
-        onActivate: onActivate,
-        compact: compact,
-        autofocus: autofocus,
-        background: const Color(0xB36D6D6E),
-        foreground: AppColors.primaryText,
-        debugLabel: debugLabel,
-        onLongActivate: onLongActivate,
-      );
+  }) => TvActionButton(
+    key: key,
+    icon: icon,
+    label: label,
+    onActivate: onActivate,
+    compact: compact,
+    autofocus: autofocus,
+    background: const Color(0xB36D6D6E),
+    foreground: AppColors.primaryText,
+    debugLabel: debugLabel,
+    onLongActivate: onLongActivate,
+  );
 
   /// 红色强调（已收藏 / 强 CTA）
   factory TvActionButton.red({
@@ -98,19 +96,18 @@ class TvActionButton extends StatelessWidget {
     bool autofocus = false,
     String? debugLabel,
     VoidCallback? onLongActivate,
-  }) =>
-      TvActionButton(
-        key: key,
-        icon: icon,
-        label: label,
-        onActivate: onActivate,
-        compact: compact,
-        autofocus: autofocus,
-        background: AppColors.netflixRed.withAlpha(178),
-        foreground: AppColors.primaryText,
-        debugLabel: debugLabel,
-        onLongActivate: onLongActivate,
-      );
+  }) => TvActionButton(
+    key: key,
+    icon: icon,
+    label: label,
+    onActivate: onActivate,
+    compact: compact,
+    autofocus: autofocus,
+    background: AppColors.netflixRed.withAlpha(178),
+    foreground: AppColors.primaryText,
+    debugLabel: debugLabel,
+    onLongActivate: onLongActivate,
+  );
 
   /// 文字型（透明底，focus 时显红环）
   factory TvActionButton.text({
@@ -122,19 +119,18 @@ class TvActionButton extends StatelessWidget {
     bool autofocus = false,
     String? debugLabel,
     VoidCallback? onLongActivate,
-  }) =>
-      TvActionButton(
-        key: key,
-        icon: icon,
-        label: label,
-        onActivate: onActivate,
-        compact: compact,
-        autofocus: autofocus,
-        background: Colors.transparent,
-        foreground: AppColors.hintText,
-        debugLabel: debugLabel,
-        onLongActivate: onLongActivate,
-      );
+  }) => TvActionButton(
+    key: key,
+    icon: icon,
+    label: label,
+    onActivate: onActivate,
+    compact: compact,
+    autofocus: autofocus,
+    background: Colors.transparent,
+    foreground: AppColors.hintText,
+    debugLabel: debugLabel,
+    onLongActivate: onLongActivate,
+  );
 
   @override
   Widget build(BuildContext context) {

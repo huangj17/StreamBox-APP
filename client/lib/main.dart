@@ -21,7 +21,8 @@ import 'features/home/providers/categories_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final isDesktop = defaultTargetPlatform == TargetPlatform.macOS ||
+  final isDesktop =
+      defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.linux;
 
@@ -38,9 +39,9 @@ void main() async {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
       const WindowOptions(
-        size: Size(1000, 700),       // 初始窗口尺寸（接近 10:7 比例）
+        size: Size(1000, 700), // 初始窗口尺寸（接近 10:7 比例）
         minimumSize: Size(800, 600), // 最小尺寸限制
-        center: true,                // 居中显示
+        center: true, // 居中显示
       ),
       () async {
         await windowManager.show();
@@ -74,19 +75,21 @@ void main() async {
   PaintingBinding.instance.imageCache.maximumSizeBytes = 50 << 20; // 50 MB
   PaintingBinding.instance.imageCache.maximumSize = 200;
 
-  runApp(ProviderScope(
-    overrides: [
-      // 注入已初始化的存储实例
-      sourceStorageProvider.overrideWithValue(sourceStorage),
-      historyStorageProvider.overrideWithValue(historyStorage),
-      favoriteStorageProvider.overrideWithValue(favoriteStorage),
-      playerSettingsStorageProvider.overrideWithValue(playerSettingsStorage),
-      searchHistoryStorageProvider.overrideWithValue(searchHistoryStorage),
-      appSettingsStorageProvider.overrideWithValue(appSettingsStorage),
-      coverCacheProvider.overrideWithValue(coverCache),
-    ],
-    child: const StreamBoxApp(),
-  ));
+  runApp(
+    ProviderScope(
+      overrides: [
+        // 注入已初始化的存储实例
+        sourceStorageProvider.overrideWithValue(sourceStorage),
+        historyStorageProvider.overrideWithValue(historyStorage),
+        favoriteStorageProvider.overrideWithValue(favoriteStorage),
+        playerSettingsStorageProvider.overrideWithValue(playerSettingsStorage),
+        searchHistoryStorageProvider.overrideWithValue(searchHistoryStorage),
+        appSettingsStorageProvider.overrideWithValue(appSettingsStorage),
+        coverCacheProvider.overrideWithValue(coverCache),
+      ],
+      child: const StreamBoxApp(),
+    ),
+  );
 }
 
 class StreamBoxApp extends StatelessWidget {

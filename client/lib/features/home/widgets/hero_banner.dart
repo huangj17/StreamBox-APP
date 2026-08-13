@@ -17,12 +17,16 @@ class HeroBanner extends StatefulWidget {
   final List<VideoItem> items;
   final Duration autoPlayInterval;
   final void Function(VideoItem item) onItemFocused;
+
   /// 「详情」按钮 / banner 整体点击 → 打开详情页
   final void Function(VideoItem item) onItemSelected;
+
   /// 「播放」按钮 → 直接进播放器（异步：fetch 详情拿到第一集再 push）
   final Future<void> Function(VideoItem item) onItemPlay;
+
   /// TV 端首页默认焦点设在「播放」按钮；桌面/手机保持 false。
   final bool autofocus;
+
   /// 首页注入的「播放」按钮 FocusNode，供下方 VideoCard 作上键兜底的锚点。
   final FocusNode? playFocusNode;
 
@@ -44,7 +48,7 @@ class HeroBanner extends StatefulWidget {
 class _HeroBannerState extends State<HeroBanner> {
   int _currentIndex = 0;
   Timer? _timer;
-  bool _paused = false;
+  final Set<String> _pauseReasons = {};
   bool _isHovering = false;
   bool _isLoadingPlay = false;
   bool _playFocused = false;
@@ -53,13 +57,13 @@ class _HeroBannerState extends State<HeroBanner> {
   Future<void> _handlePlay(VideoItem item) async {
     if (_isLoadingPlay) return;
     setState(() => _isLoadingPlay = true);
-    _paused = true;
+    _setAutoPlayPaused('loading', true);
     try {
       await widget.onItemPlay(item);
     } finally {
       if (mounted) {
         setState(() => _isLoadingPlay = false);
-        _paused = false;
+        _setAutoPlayPaused('loading', false);
       }
     }
   }
@@ -68,6 +72,27 @@ class _HeroBannerState extends State<HeroBanner> {
   void initState() {
     super.initState();
     _startAutoPlay();
+  }
+
+  @override
+  void didUpdateWidget(covariant HeroBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldItem = oldWidget.items.elementAtOrNull(_currentIndex);
+    if (widget.items.isEmpty) {
+      _currentIndex = 0;
+    } else if (oldItem != null) {
+      final retainedIndex = widget.items.indexWhere(
+        (item) => item.id == oldItem.id && item.siteKey == oldItem.siteKey,
+      );
+      _currentIndex = retainedIndex >= 0 ? retainedIndex : 0;
+    } else {
+      _currentIndex = 0;
+    }
+
+    if (!identical(oldWidget.items, widget.items) ||
+        oldWidget.autoPlayInterval != widget.autoPlayInterval) {
+      _startAutoPlay();
+    }
   }
 
   @override
@@ -80,7 +105,7 @@ class _HeroBannerState extends State<HeroBanner> {
     _timer?.cancel();
     if (widget.items.length <= 1) return;
     _timer = Timer.periodic(widget.autoPlayInterval, (_) {
-      if (!_paused && mounted) {
+      if (_pauseReasons.isEmpty && mounted && widget.items.isNotEmpty) {
         _goTo((_currentIndex + 1) % widget.items.length);
       }
     });
@@ -88,7 +113,13 @@ class _HeroBannerState extends State<HeroBanner> {
 
   /// 跳转到指定 index 并重置自动轮播计时器
   void _goTo(int index) {
-    if (!mounted || index == _currentIndex) return;
+    if (!mounted ||
+        widget.items.isEmpty ||
+        index < 0 ||
+        index >= widget.items.length ||
+        index == _currentIndex) {
+      return;
+    }
     setState(() {
       _currentIndex = index;
     });
@@ -131,8 +162,7 @@ class _HeroBannerState extends State<HeroBanner> {
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       return KeyEventResult.ignored;
     }
-    if (isPlayButton &&
-        event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    if (isPlayButton && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
       final anchor = HomeFocusAnchors.of(context);
       if (anchor != null) {
         anchor.navFirst.requestFocus();
@@ -152,6 +182,14 @@ class _HeroBannerState extends State<HeroBanner> {
   /// 重置自动轮播计时器（手动切换后重新计时）
   void _resetAutoPlay() {
     _startAutoPlay();
+  }
+
+  void _setAutoPlayPaused(String reason, bool paused) {
+    if (paused) {
+      _pauseReasons.add(reason);
+    } else {
+      _pauseReasons.remove(reason);
+    }
   }
 
   /// 可聚焦的 Banner 按钮封装
@@ -307,7 +345,8 @@ class _HeroBannerState extends State<HeroBanner> {
                         maxLines: 1,
                       ),
                       // 简介（手机端不显示）
-                      if (!isMobile && item.description?.isNotEmpty == true) ...[
+                      if (!isMobile &&
+                          item.description?.isNotEmpty == true) ...[
                         const SizedBox(height: AppSpacing.sm),
                         Text(
                           item.description!,
@@ -316,7 +355,9 @@ class _HeroBannerState extends State<HeroBanner> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
-                      SizedBox(height: isMobile ? AppSpacing.sm : AppSpacing.md),
+                      SizedBox(
+                        height: isMobile ? AppSpacing.sm : AppSpacing.md,
+                      ),
                       // 操作按钮
                       Wrap(
                         spacing: isMobile ? AppSpacing.sm : AppSpacing.md,
@@ -329,7 +370,7 @@ class _HeroBannerState extends State<HeroBanner> {
                             isPlayButton: true,
                             onFocusChanged: (hasFocus) {
                               setState(() => _playFocused = hasFocus);
-                              if (!_isLoadingPlay) _paused = hasFocus;
+                              _setAutoPlayPaused('play-focus', hasFocus);
                               // 注意：不要在这里 ensureVisible。路由 pop 回 Home
                               // 时按钮会重新拿到 primary focus，会被误触发成滚到顶。
                               // 滚动由 VideoCard / 「更多」按钮在显式 ↑ 时调。
@@ -350,13 +391,25 @@ class _HeroBannerState extends State<HeroBanner> {
                                         color: AppColors.deepBlack,
                                       ),
                                     )
-                                  : Icon(Icons.play_arrow, size: isMobile ? 18 : 24),
-                              label: Text('播放', style: TextStyle(fontSize: isMobile ? 13 : null)),
+                                  : Icon(
+                                      Icons.play_arrow,
+                                      size: isMobile ? 18 : 24,
+                                    ),
+                              label: Text(
+                                '播放',
+                                style: TextStyle(
+                                  fontSize: isMobile ? 13 : null,
+                                ),
+                              ),
                               style: isMobile
                                   ? ElevatedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 8,
+                                      ),
                                       minimumSize: Size.zero,
-                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                     )
                                   : null,
                             ),
@@ -366,22 +419,35 @@ class _HeroBannerState extends State<HeroBanner> {
                             isPlayButton: false,
                             onFocusChanged: (hasFocus) {
                               setState(() => _detailFocused = hasFocus);
-                              _paused = hasFocus;
+                              _setAutoPlayPaused('detail-focus', hasFocus);
                               // 同 play 按钮：不在这里 ensureVisible。
                             },
                             onActivate: () => widget.onItemSelected(item),
                             child: ElevatedButton.icon(
                               onPressed: () => widget.onItemSelected(item),
-                              icon: Icon(Icons.info_outline, size: isMobile ? 18 : 24),
-                              label: Text('详情', style: TextStyle(fontSize: isMobile ? 13 : null)),
+                              icon: Icon(
+                                Icons.info_outline,
+                                size: isMobile ? 18 : 24,
+                              ),
+                              label: Text(
+                                '详情',
+                                style: TextStyle(
+                                  fontSize: isMobile ? 13 : null,
+                                ),
+                              ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xB36D6D6E),
                                 foregroundColor: AppColors.primaryText,
                                 padding: isMobile
-                                    ? const EdgeInsets.symmetric(horizontal: 14, vertical: 8)
+                                    ? const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 8,
+                                      )
                                     : null,
                                 minimumSize: isMobile ? Size.zero : null,
-                                tapTargetSize: isMobile ? MaterialTapTargetSize.shrinkWrap : null,
+                                tapTargetSize: isMobile
+                                    ? MaterialTapTargetSize.shrinkWrap
+                                    : null,
                               ),
                             ),
                           ),
@@ -404,10 +470,10 @@ class _HeroBannerState extends State<HeroBanner> {
                       visibleOnHover: _isHovering,
                       onPressed: _goPrev,
                       onHoverChanged: (hovering) {
-                        _paused = hovering;
+                        _setAutoPlayPaused('left-hover', hovering);
                       },
                       onFocusChanged: (hasFocus) {
-                        _paused = hasFocus;
+                        _setAutoPlayPaused('left-focus', hasFocus);
                       },
                     ),
                   ),
@@ -424,10 +490,10 @@ class _HeroBannerState extends State<HeroBanner> {
                       visibleOnHover: _isHovering,
                       onPressed: _goNext,
                       onHoverChanged: (hovering) {
-                        _paused = hovering;
+                        _setAutoPlayPaused('right-hover', hovering);
                       },
                       onFocusChanged: (hasFocus) {
-                        _paused = hasFocus;
+                        _setAutoPlayPaused('right-focus', hasFocus);
                       },
                     ),
                   ),
@@ -551,10 +617,7 @@ class _ArrowButtonState extends State<_ArrowButton> {
                     shape: BoxShape.circle,
                     color: highlighted ? Colors.black87 : Colors.black54,
                     border: _focused
-                        ? Border.all(
-                            color: AppColors.netflixRed,
-                            width: 2,
-                          )
+                        ? Border.all(color: AppColors.netflixRed, width: 2)
                         : null,
                     boxShadow: _focused
                         ? [
@@ -641,8 +704,7 @@ class _BannerImage extends StatelessWidget {
           ),
         ),
         Positioned(
-          right:
-              PlatformService.isMobile ? AppSpacing.lg : AppSpacing.xl + 56,
+          right: PlatformService.isMobile ? AppSpacing.lg : AppSpacing.xl + 56,
           top: AppSpacing.xl,
           bottom: AppSpacing.xl,
           // AspectRatio 强制 2:3 海报区，避免 fallback / placeholder 为 0×0

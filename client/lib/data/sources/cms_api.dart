@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../core/network/bounded_response.dart';
 import '../../core/network/gateway_auth.dart';
 import '../../core/network/url_policy.dart';
+import 'cms_xml_decoder.dart';
 import '../models/site.dart';
 import '../models/category.dart';
 import '../models/video_list_result.dart';
@@ -28,6 +29,7 @@ class CmsApi {
     Duration sendTimeout = const Duration(seconds: 8),
     Duration receiveTimeout = const Duration(seconds: 8),
     bool gateway = false,
+    CancelToken? cancelToken,
   }) async {
     final url = UrlPolicy.requireCmsApiUrl(rawUrl, allowLoopback: gateway);
     final text = await getBoundedText(
@@ -37,24 +39,38 @@ class CmsApi {
       headers: gateway ? GatewayAuth.headers : null,
       sendTimeout: sendTimeout,
       receiveTimeout: receiveTimeout,
+      cancelToken: cancelToken,
       maxBytes: _maxCmsResponseBytes,
     );
-    return jsonDecode(text) as Map<String, dynamic>;
+    final trimmed = text.trimLeft();
+    if (trimmed.startsWith('<')) return decodeCmsXml(text);
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('CMS 响应必须是 JSON 对象或 XML 文档');
+    }
+    return decoded;
   }
 
   /// 获取分类列表
   /// GET {api}?ac=class
-  Future<List<Category>> fetchCategories(Site site) async {
+  Future<List<Category>> fetchCategories(
+    Site site, {
+    CancelToken? cancelToken,
+  }) async {
     final data = await _getJson(
       site.api,
       queryParameters: {'ac': 'class'},
       gateway: site.isBridge,
+      cancelToken: cancelToken,
     );
-    final list = data['class'] as List<dynamic>? ?? [];
+    final list = data['class'] is List ? data['class'] as List : const [];
     return list
+        .whereType<Map>()
         .map(
-          (e) =>
-              Category.fromJson(e as Map<String, dynamic>, siteKey: site.key),
+          (e) => Category.fromJson(
+            Map<String, dynamic>.from(e),
+            siteKey: site.key,
+          ),
         )
         .toList();
   }
@@ -93,9 +109,11 @@ class CmsApi {
       queryParameters: {'ac': 'detail', 'ids': videoId},
       gateway: site.isBridge,
     );
-    final list = data['list'] as List<dynamic>? ?? [];
+    final list = data['list'] is List ? data['list'] as List : const [];
     if (list.isEmpty) return null;
-    return CmsVideoDetail.fromJson(list[0] as Map<String, dynamic>);
+    final first = list.first;
+    if (first is! Map) return null;
+    return CmsVideoDetail.fromJson(Map<String, dynamic>.from(first));
   }
 
   /// 调用 JAR Bridge 的 playerContent，取得真实播放地址和必须透传的请求头。
@@ -140,11 +158,13 @@ class CmsApi {
   Future<VideoListResult> search({
     required Site site,
     required String keyword,
+    CancelToken? cancelToken,
   }) async {
     final data = await _getJson(
       site.api,
       queryParameters: {'wd': keyword},
       gateway: site.isBridge,
+      cancelToken: cancelToken,
     );
     return VideoListResult.fromJson(data, siteKey: site.key);
   }

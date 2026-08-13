@@ -83,8 +83,12 @@ final _railSemaphore = _AsyncSemaphore(4);
 /// 每个分类行的内容（family：会话级缓存，避免滚动时重复请求导致数据错乱）
 typedef CategoryItemsKey = ({String siteKey, String categoryId});
 
-final categoryItemsProvider =
-    FutureProvider.family<VideoListResult, CategoryItemsKey>((ref, key) async {
+final categoryItemsProvider = FutureProvider.autoDispose
+    .family<VideoListResult, CategoryItemsKey>((ref, key) async {
+      // 离屏后短期保留，兼顾回滚体验与有界内存；切源/长时间离屏会释放。
+      final keepAlive = ref.keepAlive();
+      final expiry = Timer(const Duration(minutes: 5), keepAlive.close);
+      ref.onDispose(expiry.cancel);
       final sites = ref.watch(sitesProvider);
       final site = sites.firstWhere((s) => s.key == key.siteKey);
       final repo = ref.read(homeRepositoryProvider);

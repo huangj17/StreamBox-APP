@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 
 import '../../../core/network/bounded_response.dart';
 import '../../../core/network/url_policy.dart';
+import '../player_buffering.dart';
 import 'video_engine.dart';
 
 /// 移动/TV 端播放引擎：基于 video_player
@@ -144,7 +145,9 @@ class NativeEngine implements VideoEngine {
       controller.removeListener(_onControllerChanged);
       try {
         await controller.dispose();
-      } catch (_) {}
+      } catch (error) {
+        debugPrint('释放过期播放器失败: $error');
+      }
       return;
     }
 
@@ -157,13 +160,17 @@ class NativeEngine implements VideoEngine {
     if (resumePosition != null && resumePosition > Duration.zero) {
       try {
         await controller.seekTo(resumePosition);
-      } catch (_) {}
+      } catch (error) {
+        debugPrint('恢复播放位置失败: $error');
+      }
     }
 
     try {
       await controller.setPlaybackSpeed(_playbackRate);
       await controller.setVolume(_volume);
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('恢复播放器参数失败: $error');
+    }
 
     _startPositionTimer();
 
@@ -191,8 +198,9 @@ class NativeEngine implements VideoEngine {
       _errorDebounceTimer = Timer(const Duration(milliseconds: 2500), () {
         final now = _controller?.value;
         if (now == null) return;
-        // 2.5s 后仍未拿到 duration 且未在播放 → 视为真实错误
-        if (now.duration == Duration.zero && !now.isPlaying) {
+        // 2.5s 后底层仍明确处于错误态才冒泡。duration/playing 都不能证明
+        // 首帧已渲染，也不应被用来吞掉真实错误。
+        if (now.hasError && now.errorDescription == msg) {
           _lastError = msg;
           _errorCtrl.add(msg);
         }
@@ -213,16 +221,23 @@ class NativeEngine implements VideoEngine {
       _lastDuration = d;
       _durationCtrl.add(d);
     }
-    // 缓冲位置：取所有 buffered 段的最大 end
-    if (v.buffered.isNotEmpty) {
-      var maxEnd = Duration.zero;
-      for (final range in v.buffered) {
-        if (range.end > maxEnd) maxEnd = range.end;
-      }
-      if (maxEnd != _lastBuffered) {
-        _lastBuffered = maxEnd;
-        _bufferedCtrl.add(maxEnd);
-      }
+    // 只展示包含当前播放位置的连续缓冲段，避免 seek 后把离散区间之间的
+    // 空洞误画成已缓存。
+    final bufferedEnd = continuousBufferedEnd(
+      position: v.position,
+      ranges: v.buffered.map(
+        (range) => PlaybackBufferRange(start: range.start, end: range.end),
+      ),
+    );
+    final previousBuffered = _lastBuffered;
+    final bufferedDelta = previousBuffered == null
+        ? null
+        : (bufferedEnd - previousBuffered).abs();
+    if (bufferedEnd != previousBuffered &&
+        (bufferedDelta == null ||
+            bufferedDelta >= const Duration(milliseconds: 250))) {
+      _lastBuffered = bufferedEnd;
+      _bufferedCtrl.add(bufferedEnd);
     }
   }
 

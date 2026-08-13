@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../../../core/network/url_policy.dart';
+import '../player_buffering.dart';
 import 'video_engine.dart';
 
 /// 桌面端播放引擎：基于 media_kit / libmpv
@@ -26,6 +27,17 @@ class MediaKitEngine implements VideoEngine {
   StreamSubscription<String>? _errSub;
   StreamSubscription<Tracks>? _tracksSub;
   StreamSubscription<Track>? _trackSub;
+  Timer? _positionThrottleTimer;
+  Timer? _bufferThrottleTimer;
+
+  Duration? _pendingPosition;
+  Duration? _pendingBuffer;
+  Duration? _lastPosition;
+  Duration? _lastBuffer;
+
+  double _playbackRate = 1.0;
+  int? _selectedBitrate;
+  PlaybackBufferTuning? _appliedTuning;
 
   // 转发流
   final _positionCtrl = StreamController<Duration>.broadcast();
@@ -75,8 +87,6 @@ class MediaKitEngine implements VideoEngine {
     final native = _player.platform;
     if (native is! NativePlayer) return;
     const props = {
-      'cache-secs': '30',
-      'demuxer-readahead-secs': '20',
       // 显式设防止未来升级变 yes（yes 会等缓存填满才起播，拖慢首帧）
       'cache-pause-initial': 'no',
       // media_kit 默认 5s，HLS master 握手慢时易误判
@@ -91,14 +101,38 @@ class MediaKitEngine implements VideoEngine {
         // 单个属性失败不影响其他
       }
     }
+    await _applyDynamicCacheTuning(force: true);
+  }
+
+  Future<void> _applyDynamicCacheTuning({bool force = false}) async {
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    final tuning = PlaybackBufferTuning.forPlayback(
+      playbackRate: _playbackRate,
+      bitrate: _selectedBitrate,
+    );
+    if (!force && tuning == _appliedTuning) return;
+
+    final props = {
+      'cache-secs': '${tuning.cacheSeconds}',
+      'demuxer-readahead-secs': '${tuning.readaheadSeconds}',
+    };
+    for (final property in props.entries) {
+      try {
+        await native.setProperty(property.key, property.value);
+      } catch (_) {
+        // 动态调优失败时继续沿用上一次或 libmpv 默认配置。
+      }
+    }
+    _appliedTuning = tuning;
   }
 
   void _wireStreams() {
-    _posSub = _player.stream.position.listen(_positionCtrl.add);
-    _durSub = _player.stream.duration.listen(_durationCtrl.add);
-    _bufSub = _player.stream.buffering.listen(_bufferingCtrl.add);
-    _bufferedSub = _player.stream.buffer.listen(_bufferedCtrl.add);
-    _playSub = _player.stream.playing.listen(_playingCtrl.add);
+    _posSub = _player.stream.position.listen(_onPosition);
+    _durSub = _player.stream.duration.distinct().listen(_durationCtrl.add);
+    _bufSub = _player.stream.buffering.distinct().listen(_bufferingCtrl.add);
+    _bufferedSub = _player.stream.buffer.listen(_onBuffer);
+    _playSub = _player.stream.playing.distinct().listen(_playingCtrl.add);
     _errSub = _player.stream.error.listen((e) {
       if (e.isNotEmpty) _errorCtrl.add(e);
     });
@@ -120,17 +154,58 @@ class MediaKitEngine implements VideoEngine {
     _trackSub = _player.stream.track.listen((track) {
       final v = track.video;
       if (v.id == 'auto' || v.id == 'no') {
+        _selectedBitrate = null;
         _currentQualityCtrl.add(const VideoQuality.auto());
       } else {
         final cached = _trackById[v.id] ?? v;
+        _selectedBitrate = cached.bitrate;
         _currentQualityCtrl.add(_toQuality(cached));
       }
+      unawaited(_applyDynamicCacheTuning());
     });
+  }
+
+  void _onPosition(Duration value) {
+    if (value == _lastPosition || value == _pendingPosition) return;
+    _pendingPosition = value;
+    if (_positionThrottleTimer != null) return;
+    _emitPendingPosition();
+    _positionThrottleTimer = Timer(const Duration(milliseconds: 250), () {
+      _positionThrottleTimer = null;
+      _emitPendingPosition();
+    });
+  }
+
+  void _emitPendingPosition() {
+    final value = _pendingPosition;
+    _pendingPosition = null;
+    if (value == null || value == _lastPosition) return;
+    _lastPosition = value;
+    _positionCtrl.add(value);
+  }
+
+  void _onBuffer(Duration value) {
+    if (value == _lastBuffer || value == _pendingBuffer) return;
+    _pendingBuffer = value;
+    if (_bufferThrottleTimer != null) return;
+    _emitPendingBuffer();
+    _bufferThrottleTimer = Timer(const Duration(milliseconds: 250), () {
+      _bufferThrottleTimer = null;
+      _emitPendingBuffer();
+    });
+  }
+
+  void _emitPendingBuffer() {
+    final value = _pendingBuffer;
+    _pendingBuffer = null;
+    if (value == null || value == _lastBuffer) return;
+    _lastBuffer = value;
+    _bufferedCtrl.add(value);
   }
 
   VideoQuality _toQuality(VideoTrack t) {
     if (t.id == 'auto' || t.id == 'no') return const VideoQuality.auto();
-    return VideoQuality(id: t.id, width: t.w, height: t.h);
+    return VideoQuality(id: t.id, width: t.w, height: t.h, bitrate: t.bitrate);
   }
 
   @override
@@ -176,18 +251,26 @@ class MediaKitEngine implements VideoEngine {
   Future<void> seek(Duration position) => _player.seek(position);
 
   @override
-  Future<void> setRate(double rate) => _player.setRate(rate);
+  Future<void> setRate(double rate) async {
+    _playbackRate = rate;
+    await _player.setRate(rate);
+    await _applyDynamicCacheTuning();
+  }
 
   @override
   Future<void> setVolume(double v01) =>
       _player.setVolume((v01.clamp(0.0, 1.0)) * 100);
 
   @override
-  Future<void> setQuality(VideoQuality q) {
-    if (q.isAuto) return _player.setVideoTrack(VideoTrack.auto());
+  Future<void> setQuality(VideoQuality q) async {
+    _selectedBitrate = q.bitrate;
+    await _applyDynamicCacheTuning();
+    if (q.isAuto) {
+      await _player.setVideoTrack(VideoTrack.auto());
+      return;
+    }
     final t = _trackById[q.id];
-    if (t != null) return _player.setVideoTrack(t);
-    return Future.value();
+    if (t != null) await _player.setVideoTrack(t);
   }
 
   @override
@@ -197,6 +280,8 @@ class MediaKitEngine implements VideoEngine {
 
   @override
   Future<void> dispose() async {
+    _positionThrottleTimer?.cancel();
+    _bufferThrottleTimer?.cancel();
     await _posSub?.cancel();
     await _durSub?.cancel();
     await _bufSub?.cancel();

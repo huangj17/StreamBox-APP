@@ -31,9 +31,10 @@ class _SkeletonCardState extends State<SkeletonCard>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.3, end: 0.6).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _animation = Tween<double>(
+      begin: 0.3,
+      end: 0.6,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -52,7 +53,9 @@ class _SkeletonCardState extends State<SkeletonCard>
           height: widget.height,
           decoration: BoxDecoration(
             borderRadius: AppRadius.cardBorder,
-            color: AppColors.cardBackground.withAlpha((_animation.value * 255).round()),
+            color: AppColors.cardBackground.withAlpha(
+              (_animation.value * 255).round(),
+            ),
           ),
         );
       },
@@ -80,9 +83,10 @@ class _SkeletonBannerState extends State<SkeletonBanner>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
-    _animation = Tween<double>(begin: 0.15, end: 0.35).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _animation = Tween<double>(
+      begin: 0.15,
+      end: 0.35,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -115,7 +119,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                AppColors.cardBackground.withAlpha((_animation.value * 255).round()),
+                AppColors.cardBackground.withAlpha(
+                  (_animation.value * 255).round(),
+                ),
                 AppColors.cardBackground,
               ],
             ),
@@ -133,7 +139,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                       height: titleH,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(4),
-                        color: Colors.white.withAlpha((_animation.value * 80).round()),
+                        color: Colors.white.withAlpha(
+                          (_animation.value * 80).round(),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -142,7 +150,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                       height: 16,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(4),
-                        color: Colors.white.withAlpha((_animation.value * 50).round()),
+                        color: Colors.white.withAlpha(
+                          (_animation.value * 50).round(),
+                        ),
                       ),
                     ),
                     if (!isMobile) ...[
@@ -152,7 +162,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                         height: 14,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(4),
-                          color: Colors.white.withAlpha((_animation.value * 40).round()),
+                          color: Colors.white.withAlpha(
+                            (_animation.value * 40).round(),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -161,7 +173,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                         height: 14,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(4),
-                          color: Colors.white.withAlpha((_animation.value * 40).round()),
+                          color: Colors.white.withAlpha(
+                            (_animation.value * 40).round(),
+                          ),
                         ),
                       ),
                     ],
@@ -173,7 +187,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                           height: btnH,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(4),
-                            color: Colors.white.withAlpha((_animation.value * 60).round()),
+                            color: Colors.white.withAlpha(
+                              (_animation.value * 60).round(),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -182,7 +198,9 @@ class _SkeletonBannerState extends State<SkeletonBanner>
                           height: btnH,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(4),
-                            color: Colors.white.withAlpha((_animation.value * 40).round()),
+                            color: Colors.white.withAlpha(
+                              (_animation.value * 40).round(),
+                            ),
                           ),
                         ),
                       ],

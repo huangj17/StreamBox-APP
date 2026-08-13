@@ -11,8 +11,10 @@ class TopNavBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onItemSelected;
   final bool isOpaque;
+
   /// 可选：第一项的 FocusNode，便于外部作为方向键「上」的锚点使用
   final FocusNode? firstItemFocusNode;
+
   /// 可选：按下方向键「下」时要聚焦的目标节点。
   /// 默认方向焦点策略从顶栏按下会按几何距离跳过 Banner 直达 Rail，
   /// 在首页里把这里指到 Banner 播放按钮，保证顶栏 ↓ 会先落到 Banner。
@@ -154,8 +156,9 @@ class _NavItemState extends State<_NavItem> {
                       color: highlighted
                           ? AppColors.primaryText
                           : AppColors.secondaryText,
-                      fontWeight:
-                          highlighted ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: highlighted
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                   ),
                   const SizedBox(height: 2),

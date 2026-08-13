@@ -71,8 +71,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
               _loadHistories();
               if (context.mounted) Navigator.pop(ctx);
             },
-            child: Text('清空',
-                style: TextStyle(color: AppColors.error)),
+            child: Text('清空', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -85,8 +84,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         ? Center(
             child: Text(
               '暂无播放历史',
-              style: AppTypography.body
-                  .copyWith(color: AppColors.secondaryText),
+              style: AppTypography.body.copyWith(
+                color: AppColors.secondaryText,
+              ),
             ),
           )
         : ListView.builder(
@@ -118,9 +118,12 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                 children: [
                   TextButton(
                     onPressed: _confirmClearAll,
-                    child: Text('清空',
-                        style: AppTypography.body
-                            .copyWith(color: AppColors.error)),
+                    child: Text(
+                      '清空',
+                      style: AppTypography.body.copyWith(
+                        color: AppColors.error,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -215,9 +218,7 @@ class _HistoryTile extends StatelessWidget {
                         minHeight: 3,
                         backgroundColor: AppColors.hintText.withAlpha(77),
                         valueColor: AlwaysStoppedAnimation(
-                          isFinished
-                              ? AppColors.success
-                              : AppColors.netflixRed,
+                          isFinished ? AppColors.success : AppColors.netflixRed,
                         ),
                       ),
                     ),
@@ -244,8 +245,9 @@ class _HistoryTile extends StatelessWidget {
                   const SizedBox(height: AppSpacing.xs),
                   Text(
                     history.episodeName,
-                    style: AppTypography.caption
-                        .copyWith(color: AppColors.secondaryText),
+                    style: AppTypography.caption.copyWith(
+                      color: AppColors.secondaryText,
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
@@ -259,7 +261,11 @@ class _HistoryTile extends StatelessWidget {
             ),
             // 删除按钮
             IconButton(
-              icon: const Icon(Icons.close, color: AppColors.hintText, size: 20),
+              icon: const Icon(
+                Icons.close,
+                color: AppColors.hintText,
+                size: 20,
+              ),
               onPressed: onDelete,
               tooltip: '删除',
             ),
@@ -274,7 +280,9 @@ class _HistoryTile extends StatelessWidget {
     final h = d.inHours;
     final m = d.inMinutes.remainder(60);
     final s = d.inSeconds.remainder(60);
-    if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 }

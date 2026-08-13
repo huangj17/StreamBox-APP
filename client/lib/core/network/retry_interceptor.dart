@@ -11,7 +11,8 @@ class RetryInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     // 只重试网络错误和超时，不重试 4xx/5xx（服务端明确拒绝）
-    final shouldRetry = err.type == DioExceptionType.connectionTimeout ||
+    final shouldRetry =
+        err.type == DioExceptionType.connectionTimeout ||
         err.type == DioExceptionType.sendTimeout ||
         err.type == DioExceptionType.receiveTimeout ||
         err.type == DioExceptionType.connectionError;

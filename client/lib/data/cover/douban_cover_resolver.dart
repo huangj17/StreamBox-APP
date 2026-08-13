@@ -14,8 +14,7 @@ import 'cover_resolver.dart';
 ///   实际渲染时由 [ResolvedCover.httpHeaders] 负责注入 Referer
 /// - HTTP 失败 / JSON 解析失败 / 空结果 都返回 null，不抛异常
 class DoubanCoverResolver implements CoverResolver {
-  static const _suggestEndpoint =
-      'https://movie.douban.com/j/subject_suggest';
+  static const _suggestEndpoint = 'https://movie.douban.com/j/subject_suggest';
   static const _userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -69,7 +68,8 @@ class DoubanCoverResolver implements CoverResolver {
         if (img is! String || img.isEmpty) continue;
         fallback ??= m;
         final titleMatch = (m['title'] as String?)?.trim() == q;
-        final yMatch = year == null ||
+        final yMatch =
+            year == null ||
             year.trim().isEmpty ||
             (m['year'] as String?)?.trim() == year.trim();
         if (titleMatch && yMatch) {

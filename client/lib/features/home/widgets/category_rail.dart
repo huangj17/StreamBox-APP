@@ -251,13 +251,11 @@ class _ViewMoreButtonState extends State<_ViewMoreButton> {
       onFocusChange: (hasFocus) {
         setState(() => _focused = hasFocus);
         if (hasFocus) {
-          try {
-            Scrollable.ensureVisible(
-              context,
-              duration: const Duration(milliseconds: 300),
-              alignment: 0.3,
-            );
-          } catch (_) {}
+          Scrollable.ensureVisible(
+            context,
+            duration: const Duration(milliseconds: 300),
+            alignment: 0.3,
+          );
         }
       },
       onKeyEvent: (node, event) {

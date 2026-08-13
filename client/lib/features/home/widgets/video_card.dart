@@ -24,6 +24,7 @@ class VideoCard extends StatefulWidget {
   /// 当 → 键的默认方向焦点找不到可聚焦候选（rail 尾端卡片），调此回调
   /// 作兜底（如跳到本 rail「更多」按钮）。非末尾卡不会触发。
   final VoidCallback? onRightEdge;
+
   /// ↑ 键优先回调：rail 内任一卡片按 ↑ 时直接跳到本 rail「更多」按钮。
   /// 设置后会覆盖默认几何上行和 Banner 兜底（因为「更多」按钮语义上属于当前 rail）。
   final VoidCallback? onUpEdge;
@@ -53,9 +54,7 @@ class _VideoCardState extends State<VideoCard> {
   @override
   Widget build(BuildContext context) {
     // RepaintBoundary：隔离每张卡片的重绘，hover/focus 动画不影响其它卡片
-    return RepaintBoundary(
-      child: _buildFocusableCard(),
-    );
+    return RepaintBoundary(child: _buildFocusableCard());
   }
 
   Widget _buildFocusableCard() {
@@ -66,13 +65,11 @@ class _VideoCardState extends State<VideoCard> {
         if (hasFocus) {
           widget.onFocused();
           // 焦点进入卡片时自动滚入可视区域；已可见时是 no-op，无外层 Scrollable 时静默忽略
-          try {
-            Scrollable.ensureVisible(
-              context,
-              duration: const Duration(milliseconds: 300),
-              alignment: 0.3,
-            );
-          } catch (_) {}
+          Scrollable.ensureVisible(
+            context,
+            duration: const Duration(milliseconds: 300),
+            alignment: 0.3,
+          );
         }
       },
       onKeyEvent: (node, event) {
@@ -91,8 +88,9 @@ class _VideoCardState extends State<VideoCard> {
             widget.onUpEdge!();
             return KeyEventResult.handled;
           }
-          final moved =
-              FocusScope.of(context).focusInDirection(TraversalDirection.up);
+          final moved = FocusScope.of(
+            context,
+          ).focusInDirection(TraversalDirection.up);
           if (moved) {
             // 几何上行若落到 Banner，顺手把 Banner 拉回视口
             final anchor = HomeFocusAnchors.of(context);
@@ -112,16 +110,18 @@ class _VideoCardState extends State<VideoCard> {
         // 向右：默认先试；rail 尾端找不到候选时兜底到「更多」按钮（如果有）
         if (event.logicalKey == LogicalKeyboardKey.arrowRight &&
             widget.onRightEdge != null) {
-          final moved =
-              FocusScope.of(context).focusInDirection(TraversalDirection.right);
+          final moved = FocusScope.of(
+            context,
+          ).focusInDirection(TraversalDirection.right);
           if (moved) return KeyEventResult.handled;
           widget.onRightEdge!();
           return KeyEventResult.handled;
         }
         // 向左：默认先试（rail 内左移）；rail 首张找不到候选时兜底进 SideNav
         if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          final moved =
-              FocusScope.of(context).focusInDirection(TraversalDirection.left);
+          final moved = FocusScope.of(
+            context,
+          ).focusInDirection(TraversalDirection.left);
           if (moved) return KeyEventResult.handled;
           final anchor = HomeFocusAnchors.of(context);
           if (anchor != null) {
@@ -186,7 +186,7 @@ class _VideoCardState extends State<VideoCard> {
                                 : Colors.black.withAlpha(160),
                             blurRadius: 16,
                             spreadRadius: 2,
-                          )
+                          ),
                         ]
                       : null,
                 ),
@@ -215,10 +215,7 @@ class _VideoCardState extends State<VideoCard> {
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.transparent,
-                                Color(0xDD000000),
-                              ],
+                              colors: [Colors.transparent, Color(0xDD000000)],
                             ),
                           ),
                         ),
@@ -280,8 +277,9 @@ class _VideoCardState extends State<VideoCard> {
                             ),
                             child: Text(
                               widget.video.remarks!,
-                              style:
-                                  AppTypography.caption.copyWith(fontSize: 11),
+                              style: AppTypography.caption.copyWith(
+                                fontSize: 11,
+                              ),
                             ),
                           ),
                         ),
@@ -296,7 +294,8 @@ class _VideoCardState extends State<VideoCard> {
                             minHeight: 3,
                             backgroundColor: AppColors.hintText.withAlpha(77),
                             valueColor: const AlwaysStoppedAnimation(
-                                AppColors.netflixRed),
+                              AppColors.netflixRed,
+                            ),
                           ),
                         ),
                     ],

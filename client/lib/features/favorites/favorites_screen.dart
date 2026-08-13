@@ -19,17 +19,18 @@ class FavoritesScreen extends ConsumerWidget {
     final items = favorites.map(VideoItem.fromFavorite).toList();
 
     final body = items.isEmpty
-          ? Center(
-              child: Text(
-                '暂无收藏内容',
-                style: AppTypography.body
-                    .copyWith(color: AppColors.secondaryText),
+        ? Center(
+            child: Text(
+              '暂无收藏内容',
+              style: AppTypography.body.copyWith(
+                color: AppColors.secondaryText,
               ),
-            )
-          : _FavoritesGrid(
-              items: items,
-              onItemSelected: (video) => _navigateToDetail(context, ref, video),
-            );
+            ),
+          )
+        : _FavoritesGrid(
+            items: items,
+            onItemSelected: (video) => _navigateToDetail(context, ref, video),
+          );
 
     if (embedded) {
       return Column(
@@ -42,9 +43,12 @@ class FavoritesScreen extends ConsumerWidget {
                 children: [
                   TextButton(
                     onPressed: () => _confirmClearAll(context, ref),
-                    child: Text('清空',
-                        style: AppTypography.body
-                            .copyWith(color: AppColors.error)),
+                    child: Text(
+                      '清空',
+                      style: AppTypography.body.copyWith(
+                        color: AppColors.error,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -61,8 +65,10 @@ class FavoritesScreen extends ConsumerWidget {
           if (items.isNotEmpty)
             TextButton(
               onPressed: () => _confirmClearAll(context, ref),
-              child: Text('清空',
-                  style: AppTypography.body.copyWith(color: AppColors.error)),
+              child: Text(
+                '清空',
+                style: AppTypography.body.copyWith(color: AppColors.error),
+              ),
             ),
         ],
       ),
@@ -70,8 +76,7 @@ class FavoritesScreen extends ConsumerWidget {
     );
   }
 
-  void _navigateToDetail(
-      BuildContext context, WidgetRef ref, VideoItem video) {
+  void _navigateToDetail(BuildContext context, WidgetRef ref, VideoItem video) {
     navigateToVideoDetail(
       context,
       ref,
@@ -99,8 +104,7 @@ class FavoritesScreen extends ConsumerWidget {
               ref.invalidate(favoritesProvider);
               Navigator.pop(ctx);
             },
-            child: Text('清空',
-                style: TextStyle(color: AppColors.error)),
+            child: Text('清空', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -121,7 +125,10 @@ class _FavoritesGrid extends StatelessWidget {
 
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(
-        AppSpacing.xl, AppSpacing.xl, AppSpacing.xl, AppSpacing.xxl,
+        AppSpacing.xl,
+        AppSpacing.xl,
+        AppSpacing.xl,
+        AppSpacing.xxl,
       ),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,

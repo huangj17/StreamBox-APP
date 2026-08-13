@@ -15,10 +15,11 @@ class HistoryStorage {
 
   /// 获取继续观看列表（按最近观看时间排序，过滤已看完）
   Future<List<WatchHistory>> getAll({int limit = 20}) async {
-    final list = _box.values
-        .map((e) => WatchHistory.fromMap(Map<String, dynamic>.from(e)))
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final list =
+        _box.values
+            .map((e) => WatchHistory.fromMap(Map<String, dynamic>.from(e)))
+            .toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     return list
         .where((h) => h.progress < 0.95) // 过滤已看完
@@ -28,10 +29,11 @@ class HistoryStorage {
 
   /// 获取全部历史记录（包含已看完，不限条数）
   List<WatchHistory> getAllUnfiltered() {
-    final list = _box.values
-        .map((e) => WatchHistory.fromMap(Map<String, dynamic>.from(e)))
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final list =
+        _box.values
+            .map((e) => WatchHistory.fromMap(Map<String, dynamic>.from(e)))
+            .toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     return list;
   }
 
@@ -71,12 +73,9 @@ class HistoryStorage {
     final entries = _box.keys.map((k) {
       final map = Map<String, dynamic>.from(_box.get(k)!);
       return MapEntry(k, WatchHistory.fromMap(map));
-    }).toList()
-      ..sort((a, b) => a.value.updatedAt.compareTo(b.value.updatedAt));
+    }).toList()..sort((a, b) => a.value.updatedAt.compareTo(b.value.updatedAt));
 
-    final toDelete = entries
-        .take(_box.length - _maxCount)
-        .map((e) => e.key);
+    final toDelete = entries.take(_box.length - _maxCount).map((e) => e.key);
     await _box.deleteAll(toDelete);
   }
 }

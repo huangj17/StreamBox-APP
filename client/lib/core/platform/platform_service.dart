@@ -1,4 +1,5 @@
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// 应用运行平台
@@ -44,7 +45,9 @@ class PlatformService {
       await _channel.invokeMethod<void>('setKeepScreenOn', {
         'enabled': enabled,
       });
-    } catch (_) {}
+    } catch (error) {
+      debugPrint('设置屏幕常亮失败: $error');
+    }
   }
 
   static AppPlatform get current {

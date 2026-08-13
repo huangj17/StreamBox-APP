@@ -1,3 +1,7 @@
+import 'dart:math' as math;
+
+import 'package:dio/dio.dart';
+
 import '../sources/cms_api.dart';
 import '../models/site.dart';
 import '../models/category.dart';
@@ -5,6 +9,9 @@ import '../models/video_list_result.dart';
 
 /// Home 模块数据组装层
 class HomeRepository {
+  static const _categoryLoadBudget = Duration(seconds: 4);
+  static const _maxConcurrentCategoryRequests = 4;
+
   final CmsApi _api;
 
   HomeRepository(this._api);
@@ -18,10 +25,39 @@ class HomeRepository {
     // 固定行
     final fixed = <Category>[FixedCategories.watchHistory];
 
-    // 并发请求所有 Site 的分类
-    final results = await Future.wait(
-      sites.map(
-        (site) => _api.fetchCategories(site).catchError((_) => <Category>[]),
+    // 使用固定 worker 数与整批截止时间：坏源不会把首页拖到 Dio 重试结束，
+    // 大型多源配置也不会一次性创建无上限的网络连接。
+    final results = List<List<Category>>.generate(sites.length, (_) => []);
+    final deadline = DateTime.now().add(_categoryLoadBudget);
+    var nextIndex = 0;
+
+    Future<void> worker() async {
+      while (nextIndex < sites.length) {
+        final index = nextIndex++;
+        final remaining = deadline.difference(DateTime.now());
+        if (remaining <= Duration.zero) return;
+
+        final cancelToken = CancelToken();
+        try {
+          results[index] = await _api
+              .fetchCategories(sites[index], cancelToken: cancelToken)
+              .timeout(
+                remaining,
+                onTimeout: () {
+                  cancelToken.cancel('首页分类加载超时');
+                  return <Category>[];
+                },
+              );
+        } catch (_) {
+          results[index] = [];
+        }
+      }
+    }
+
+    await Future.wait(
+      List.generate(
+        math.min(_maxConcurrentCategoryRequests, sites.length),
+        (_) => worker(),
       ),
     );
 

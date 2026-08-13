@@ -50,6 +50,22 @@
 - **为什么改** — 关联的 Issue 编号或场景
 - **怎么测的** — 用了什么平台、复现步骤
 
+### Android 发布签名
+
+标签发布不会回退到 Debug 证书。仓库维护者需要在 GitHub Actions 中配置以下
+Repository secrets；缺失、配置不完整或证书指纹不匹配时，发布任务会在上传前失败。
+
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Release keystore 的 Base64 内容 |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | Release key alias |
+| `ANDROID_KEY_PASSWORD` | Release key 密码 |
+| `ANDROID_CERT_SHA256` | 签名证书 SHA-256 指纹（可带或不带冒号） |
+
+证书指纹可通过 `keytool -list -v -keystore release.jks -alias <alias>` 获取。
+务必备份 keystore；丢失后将无法为已安装版本提供可直接升级的 APK。
+
 ## 行为准则
 
 保持友善与尊重。技术讨论对事不对人，不接受人身攻击或歧视性言论。

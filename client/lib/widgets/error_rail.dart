@@ -11,11 +11,7 @@ class ErrorRail extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
 
-  const ErrorRail({
-    super.key,
-    this.message = '加载失败，按 OK 重试',
-    this.onRetry,
-  });
+  const ErrorRail({super.key, this.message = '加载失败，按 OK 重试', this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -27,8 +23,7 @@ class ErrorRail extends StatelessWidget {
           onActivate: onRetry,
           ensureVisibleOnFocus: false,
           builder: (context, focused) {
-            final accent =
-                focused ? AppColors.netflixRed : AppColors.hintText;
+            final accent = focused ? AppColors.netflixRed : AppColors.hintText;
             return AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               constraints: const BoxConstraints(minWidth: 240),
@@ -37,14 +32,10 @@ class ErrorRail extends StatelessWidget {
                 vertical: AppSpacing.md,
               ),
               decoration: BoxDecoration(
-                color: focused
-                    ? AppColors.surface
-                    : Colors.transparent,
+                color: focused ? AppColors.surface : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: focused
-                      ? AppColors.netflixRed
-                      : Colors.transparent,
+                  color: focused ? AppColors.netflixRed : Colors.transparent,
                   width: 1,
                 ),
                 boxShadow: focused

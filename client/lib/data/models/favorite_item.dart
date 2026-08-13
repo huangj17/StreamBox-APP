@@ -24,25 +24,24 @@ class FavoriteItem {
   String get storageKey => '${videoId}_$siteKey';
 
   Map<String, dynamic> toMap() => {
-        'videoId': videoId,
-        'siteKey': siteKey,
-        'title': title,
-        'cover': cover,
-        'year': year,
-        'category': category,
-        'remarks': remarks,
-        'createdAt': createdAt.millisecondsSinceEpoch,
-      };
+    'videoId': videoId,
+    'siteKey': siteKey,
+    'title': title,
+    'cover': cover,
+    'year': year,
+    'category': category,
+    'remarks': remarks,
+    'createdAt': createdAt.millisecondsSinceEpoch,
+  };
 
   factory FavoriteItem.fromMap(Map<String, dynamic> map) => FavoriteItem(
-        videoId: map['videoId'] as String,
-        siteKey: map['siteKey'] as String,
-        title: map['title'] as String,
-        cover: map['cover'] as String,
-        year: map['year'] as String?,
-        category: map['category'] as String?,
-        remarks: map['remarks'] as String?,
-        createdAt:
-            DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int),
-      );
+    videoId: map['videoId'] as String,
+    siteKey: map['siteKey'] as String,
+    title: map['title'] as String,
+    cover: map['cover'] as String,
+    year: map['year'] as String?,
+    category: map['category'] as String?,
+    remarks: map['remarks'] as String?,
+    createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int),
+  );
 }

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
-    <!-- 本地开发 Bridge 的最小明文例外；远程 Gateway 必须使用 HTTPS。 -->
+    <!-- CMS/Gateway/config 仍由 UrlPolicy 强制 HTTPS；这里只为公共 HTTP 媒体流
+         开放平台传输能力，私网播放地址继续由 UrlPolicy 拒绝。 -->
+    <base-config cleartextTrafficPermitted="true" />
+    <!-- 本地开发 Bridge 例外。 -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">localhost</domain>
         <domain includeSubdomains="false">127.0.0.1</domain>

@@ -2,16 +2,16 @@
 /// 基于 8dp 网格系统
 /// 参考 docs/StreamBox_UI_Design.md 间距系统
 class AppSpacing {
-  static const double xs = 4.0;   // icon 内边距、标签间距
-  static const double sm = 8.0;   // 卡片文字间距
-  static const double md = 16.0;  // 卡片之间间距
-  static const double lg = 24.0;  // 内容行间距
-  static const double xl = 40.0;  // 页面左右安全边距
+  static const double xs = 4.0; // icon 内边距、标签间距
+  static const double sm = 8.0; // 卡片文字间距
+  static const double md = 16.0; // 卡片之间间距
+  static const double lg = 24.0; // 内容行间距
+  static const double xl = 40.0; // 页面左右安全边距
   static const double xxl = 64.0; // Hero Banner 到内容间距
 
   // 组件尺寸
   static const double navBarHeight = 56.0;
-  static const double heroBannerHeight = 540.0;  // 50vh @ 1080p
+  static const double heroBannerHeight = 540.0; // 50vh @ 1080p
   static const double controlBarHeight = 120.0;
   static const double settingsSidebarWidth = 280.0;
   // SideNav（TV / 桌面焦点模式）
@@ -20,7 +20,7 @@ class AppSpacing {
 
   // 卡片尺寸
   static const double cardWidth = 160.0;
-  static const double cardHeight = 240.0;       // 竖版 2:3
+  static const double cardHeight = 240.0; // 竖版 2:3
   static const double cardWidthLandscape = 213.0;
   static const double cardHeightLandscape = 120.0; // 横版（继续观看行）
 

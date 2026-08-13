@@ -33,30 +33,30 @@ class WatchHistory {
   String get storageKey => '${videoId}_$siteKey';
 
   Map<String, dynamic> toMap() => {
-        'videoId': videoId,
-        'siteKey': siteKey,
-        'title': title,
-        'cover': cover,
-        'episodeName': episodeName,
-        'episodeIndex': episodeIndex,
-        'groupIndex': groupIndex,
-        'positionMs': positionMs,
-        'durationMs': durationMs,
-        'updatedAt': updatedAt.millisecondsSinceEpoch,
-        if (category != null) 'category': category,
-      };
+    'videoId': videoId,
+    'siteKey': siteKey,
+    'title': title,
+    'cover': cover,
+    'episodeName': episodeName,
+    'episodeIndex': episodeIndex,
+    'groupIndex': groupIndex,
+    'positionMs': positionMs,
+    'durationMs': durationMs,
+    'updatedAt': updatedAt.millisecondsSinceEpoch,
+    if (category != null) 'category': category,
+  };
 
   factory WatchHistory.fromMap(Map<String, dynamic> map) => WatchHistory(
-        videoId: map['videoId'] as String,
-        siteKey: map['siteKey'] as String,
-        title: map['title'] as String,
-        cover: map['cover'] as String,
-        episodeName: map['episodeName'] as String,
-        episodeIndex: map['episodeIndex'] as int,
-        groupIndex: map['groupIndex'] as int? ?? 0,
-        positionMs: map['positionMs'] as int,
-        durationMs: map['durationMs'] as int,
-        updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updatedAt'] as int),
-        category: map['category'] as String?,
-      );
+    videoId: map['videoId'] as String,
+    siteKey: map['siteKey'] as String,
+    title: map['title'] as String,
+    cover: map['cover'] as String,
+    episodeName: map['episodeName'] as String,
+    episodeIndex: map['episodeIndex'] as int,
+    groupIndex: map['groupIndex'] as int? ?? 0,
+    positionMs: map['positionMs'] as int,
+    durationMs: map['durationMs'] as int,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updatedAt'] as int),
+    category: map['category'] as String?,
+  );
 }

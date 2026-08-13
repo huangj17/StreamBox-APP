@@ -13,10 +13,11 @@ class FavoriteStorage {
 
   /// 获取全部收藏（按收藏时间倒序）
   List<FavoriteItem> getAll() {
-    final list = _box.values
-        .map((e) => FavoriteItem.fromMap(Map<String, dynamic>.from(e)))
-        .toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final list =
+        _box.values
+            .map((e) => FavoriteItem.fromMap(Map<String, dynamic>.from(e)))
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
   }
 

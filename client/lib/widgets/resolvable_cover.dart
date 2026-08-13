@@ -25,6 +25,7 @@ class ResolvableCover extends ConsumerStatefulWidget {
   final Widget Function(BuildContext, ImageProvider)? imageBuilder;
   final Color? color;
   final BlendMode? colorBlendMode;
+
   /// 自定义失败/加载态展示。不传则用 LetterPoster。
   /// 传 SizedBox.shrink() 可在失败时完全不渲染。
   final Widget? fallback;
@@ -55,6 +56,7 @@ class _ResolvableCoverState extends ConsumerState<ResolvableCover> {
   bool _resolving = false;
   bool _directFailed = false;
   int _cacheVersion = 0;
+  int _resolveGeneration = 0;
 
   bool get _directEmpty => (widget.directUrl?.trim() ?? '').isEmpty;
 
@@ -71,6 +73,7 @@ class _ResolvableCoverState extends ConsumerState<ResolvableCover> {
     if (old.directUrl != widget.directUrl ||
         old.title != widget.title ||
         old.year != widget.year) {
+      _resolveGeneration++;
       _resolved = null;
       _resolving = false;
       _directFailed = false;
@@ -92,16 +95,24 @@ class _ResolvableCoverState extends ConsumerState<ResolvableCover> {
     if (_resolving || _resolved != null) return;
     if (widget.title.trim().isEmpty) return;
     _resolving = true;
+    final generation = _resolveGeneration;
+    final title = widget.title;
+    final year = widget.year;
     final resolver = ref.read(coverResolverProvider);
-    resolver.resolve(widget.title, widget.year).then((r) {
-      if (!mounted) return;
-      setState(() {
-        _resolving = false;
-        _resolved = r;
-      });
-    }).catchError((_) {
-      if (mounted) setState(() => _resolving = false);
-    });
+    resolver
+        .resolve(title, year)
+        .then((r) {
+          if (!mounted || generation != _resolveGeneration) return;
+          setState(() {
+            _resolving = false;
+            _resolved = r;
+          });
+        })
+        .catchError((_) {
+          if (mounted && generation == _resolveGeneration) {
+            setState(() => _resolving = false);
+          }
+        });
   }
 
   Widget _buildFallback() {
@@ -153,6 +164,7 @@ class _ResolvableCoverState extends ConsumerState<ResolvableCover> {
     final version = ref.watch(coverCacheVersionProvider);
     if (version != _cacheVersion) {
       _cacheVersion = version;
+      _resolveGeneration++;
       _resolved = null;
       _resolving = false;
       _directFailed = false;

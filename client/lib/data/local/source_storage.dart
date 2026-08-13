@@ -37,25 +37,31 @@ class SourceStorage {
 
   /// 已知片源的友好名称和描述
   static const sourceInfo = <String, ({String name, String desc})>{
-    'http://127.0.0.1:9978':
-        (name: 'JAR Bridge', desc: '本机服务 · JAR 插件源'),
-    'https://bfzyapi.com/api.php/provide/vod/':
-        (name: '暴风资源', desc: 'HD · 13万+ · 多CDN'),
-    'https://www.hongniuzy2.com/api.php/provide/vod/':
-        (name: '红牛资源', desc: '双线路 · 10万+'),
-    'https://www.tyyszy.com/api.php/provide/vod/':
-        (name: '天一资源', desc: '多画质 · 75分类'),
-    'https://collect.wolongzyw.com/api.php/provide/vod/':
-        (name: '卧龙资源', desc: '8.5万+ · 54分类'),
-    'https://api.apibdzy.com/api.php/provide/vod/':
-        (name: '百度资源', desc: '老牌稳定 · 50分类'),
+    'http://127.0.0.1:9978': (name: 'JAR Bridge', desc: '本机服务 · JAR 插件源'),
+    'https://bfzyapi.com/api.php/provide/vod/': (
+      name: '暴风资源',
+      desc: 'HD · 13万+ · 多CDN',
+    ),
+    'https://www.hongniuzy2.com/api.php/provide/vod/': (
+      name: '红牛资源',
+      desc: '双线路 · 10万+',
+    ),
+    'https://www.tyyszy.com/api.php/provide/vod/': (
+      name: '天一资源',
+      desc: '多画质 · 75分类',
+    ),
+    'https://collect.wolongzyw.com/api.php/provide/vod/': (
+      name: '卧龙资源',
+      desc: '8.5万+ · 54分类',
+    ),
+    'https://api.apibdzy.com/api.php/provide/vod/': (
+      name: '百度资源',
+      desc: '老牌稳定 · 50分类',
+    ),
     // 多仓 / 第三方单仓
-    'https://www.iyouhun.com/tv/dc':
-        (name: '游魂多仓', desc: '多仓 · 27个子源'),
-    'https://www.iyouhun.com/tv/fty':
-        (name: '饭太硬', desc: '单仓 · 综合源'),
-    'https://www.iyouhun.com/tv/fxz':
-        (name: '分享者', desc: '单仓 · 画质高 · 速度慢'),
+    'https://www.iyouhun.com/tv/dc': (name: '游魂多仓', desc: '多仓 · 27个子源'),
+    'https://www.iyouhun.com/tv/fty': (name: '饭太硬', desc: '单仓 · 综合源'),
+    'https://www.iyouhun.com/tv/fxz': (name: '分享者', desc: '单仓 · 画质高 · 速度慢'),
   };
 
   /// 根据 URL 获取友好名称，未知源从域名提取
@@ -81,10 +87,8 @@ class SourceStorage {
 
   /// 获取所有已保存的配置源 URL
   /// 只返回 add() 写入的整数键条目，过滤掉 '_selected' 字符串键
-  List<String> getAll() => _box.keys
-      .whereType<int>()
-      .map((k) => _box.get(k)!)
-      .toList();
+  List<String> getAll() =>
+      _box.keys.whereType<int>().map((k) => _box.get(k)!).toList();
 
   /// 添加配置源 URL
   Future<void> add(String url) async {
@@ -110,12 +114,13 @@ class SourceStorage {
   }
 
   /// 获取多仓源上次选中的仓库 URL
-  String? getSelectedWarehouse(String sourceUrl) =>
-      _box.get('_wh:$sourceUrl');
+  String? getSelectedWarehouse(String sourceUrl) => _box.get('_wh:$sourceUrl');
 
   /// 保存多仓源选中的仓库 URL
   Future<void> setSelectedWarehouse(
-      String sourceUrl, String warehouseUrl) async {
+    String sourceUrl,
+    String warehouseUrl,
+  ) async {
     await _box.put('_wh:$sourceUrl', warehouseUrl);
   }
 
@@ -124,8 +129,7 @@ class SourceStorage {
       _box.get('_bp:$sourceUrl');
 
   /// 保存 Bridge 源选中的插件 key；传 null 表示"全部"（清除记录）
-  Future<void> setSelectedBridgePlugin(
-      String sourceUrl, String? key) async {
+  Future<void> setSelectedBridgePlugin(String sourceUrl, String? key) async {
     if (key == null) {
       await _box.delete('_bp:$sourceUrl');
     } else {

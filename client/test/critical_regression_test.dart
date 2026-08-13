@@ -109,6 +109,8 @@ class _FakeCmsApi extends CmsApi {
   _FakeCmsApi(this.categories) : super(Dio());
 
   @override
-  Future<List<Category>> fetchCategories(Site site) async =>
-      categories[site.key] ?? const [];
+  Future<List<Category>> fetchCategories(
+    Site site, {
+    CancelToken? cancelToken,
+  }) async => categories[site.key] ?? const [];
 }

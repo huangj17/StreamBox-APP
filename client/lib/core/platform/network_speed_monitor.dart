@@ -5,9 +5,9 @@ import 'package:flutter/services.dart';
 
 /// 网速监视器
 ///
-/// 通过 `com.streambox/platform` MethodChannel 轮询 native 侧累计下载字节数
-/// （Android `TrafficStats.getUidRxBytes` / iOS `getifaddrs`），Dart 侧做 diff
-/// 计算每秒下载字节数。`null` 表示平台不支持或读取失败。
+/// 通过 `com.streambox/platform` MethodChannel 轮询 Android
+/// `TrafficStats.getUidRxBytes`，Dart 侧做 diff 计算应用级每秒下载字节数。
+/// 它不是单个视频请求的吞吐量；`null` 表示平台不支持或读取失败。
 ///
 /// 用途：播放卡住 / 缓冲时在 UI 上显示当前网速，让用户能判断是 CMS 源慢
 /// 还是本地网络慢。
@@ -75,13 +75,13 @@ class NetworkSpeedMonitor {
     await _ctrl.close();
   }
 
-  /// 格式化为人类可读："128KB/s" / "1.2MB/s"
+  /// 格式化为人类可读："128 KB/s" / "1.2 MB/s"
   static String format(int? bytesPerSec) {
     if (bytesPerSec == null) return '';
-    if (bytesPerSec < 1024) return '${bytesPerSec}B/s';
+    if (bytesPerSec < 1024) return '$bytesPerSec B/s';
     if (bytesPerSec < 1024 * 1024) {
-      return '${(bytesPerSec / 1024).toStringAsFixed(0)}KB/s';
+      return '${(bytesPerSec / 1024).toStringAsFixed(0)} KB/s';
     }
-    return '${(bytesPerSec / 1024 / 1024).toStringAsFixed(1)}MB/s';
+    return '${(bytesPerSec / 1024 / 1024).toStringAsFixed(1)} MB/s';
   }
 }

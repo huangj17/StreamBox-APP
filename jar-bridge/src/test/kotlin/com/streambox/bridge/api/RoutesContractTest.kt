@@ -96,6 +96,55 @@ class RoutesContractTest {
     }
 
     @Test
+    fun `gateway measures plugin response limit in UTF-8 bytes`() = testApplication {
+        val oversized = object : ContractSpiderRuntime("manual", "Manual") {
+            override suspend fun searchContent(keyword: String, quick: Boolean): Result<String> =
+                Result.success("{\"value\":\"${"你".repeat(30)}\"}")
+        }
+        application {
+            module(
+                catalogManager = catalogManager(oversized),
+                config = BridgeConfig(
+                    security = SecurityConfig(maxResponseBytes = 64),
+                ),
+            )
+        }
+
+        assertEquals(HttpStatusCode.BadGateway, client.get("/api/manual?wd=query").status)
+    }
+
+    @Test
+    fun `category filters reach spiders and produce distinct cache entries`() = testApplication {
+        ResponseCache.clear()
+        val runtime = object : ContractSpiderRuntime("filters", "Filters") {
+            var categoryCalls = 0
+
+            override suspend fun categoryContent(
+                tid: String,
+                page: String,
+                filter: Boolean,
+                extend: HashMap<String, String>,
+            ): Result<String> {
+                categoryCalls += 1
+                return Result.success(
+                    "{\"route\":\"category\",\"year\":\"${extend["year"].orEmpty()}\",\"list\":[]}",
+                )
+            }
+        }
+        application { module(catalogManager = catalogManager(runtime)) }
+
+        val first = client.get("/api/filters?ac=detail&t=movie&pg=1&year=2024")
+        val second = client.get("/api/filters?year=2023&pg=1&t=movie&ac=detail")
+        val cached = client.get("/api/filters?t=movie&year=2024&pg=1&ac=detail")
+
+        assertEquals("2024", responseField(first.bodyAsText(), "year"))
+        assertEquals("2023", responseField(second.bodyAsText(), "year"))
+        assertEquals("2024", responseField(cached.bodyAsText(), "year"))
+        assertEquals(2, runtime.categoryCalls)
+        ResponseCache.clear()
+    }
+
+    @Test
     fun `api list exposes ready manual entries from the active catalog`() = testApplication {
         val runtime = ContractSpiderRuntime("manual", "Manual")
         val catalogManager = CatalogManager(
@@ -273,6 +322,13 @@ private fun routeMarker(body: String): String = Json
     .parseToJsonElement(body)
     .jsonObject
     .getValue("route")
+    .jsonPrimitive
+    .content
+
+private fun responseField(body: String, field: String): String = Json
+    .parseToJsonElement(body)
+    .jsonObject
+    .getValue(field)
     .jsonPrimitive
     .content
 

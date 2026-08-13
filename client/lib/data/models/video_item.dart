@@ -35,41 +35,43 @@ class VideoItem {
     this.historyPositionMs,
   });
 
-  factory VideoItem.fromJson(Map<String, dynamic> json, {required String siteKey}) =>
-      VideoItem(
-        id: json['vod_id'].toString(),
-        title: json['vod_name'] as String? ?? '',
-        cover: fixCoverUrl(json['vod_pic'] as String? ?? ''),
-        backdrop: json['vod_blurb_img'] as String?,
-        year: json['vod_year'] as String?,
-        category: json['vod_class'] as String?,
-        remarks: json['vod_remarks'] as String?,
-        description: json['vod_blurb'] as String?,
-        score: json['vod_score']?.toString(),
-        siteKey: siteKey,
-      );
+  factory VideoItem.fromJson(
+    Map<String, dynamic> json, {
+    required String siteKey,
+  }) => VideoItem(
+    id: json['vod_id'].toString(),
+    title: json['vod_name']?.toString() ?? '',
+    cover: fixCoverUrl(json['vod_pic']?.toString() ?? ''),
+    backdrop: json['vod_blurb_img']?.toString(),
+    year: json['vod_year']?.toString(),
+    category: json['vod_class']?.toString(),
+    remarks: json['vod_remarks']?.toString(),
+    description: json['vod_blurb']?.toString(),
+    score: json['vod_score']?.toString(),
+    siteKey: siteKey,
+  );
 
   /// 从收藏项创建（用于收藏列表）
   factory VideoItem.fromFavorite(FavoriteItem f) => VideoItem(
-        id: f.videoId,
-        siteKey: f.siteKey,
-        title: f.title,
-        cover: f.cover,
-        year: f.year,
-        category: f.category,
-        remarks: f.remarks,
-      );
+    id: f.videoId,
+    siteKey: f.siteKey,
+    title: f.title,
+    cover: f.cover,
+    year: f.year,
+    category: f.category,
+    remarks: f.remarks,
+  );
 
   /// 从观看历史创建（用于「继续观看」行），保留集数和进度用于续播
   factory VideoItem.fromHistory(WatchHistory h) => VideoItem(
-        id: h.videoId,
-        siteKey: h.siteKey,
-        title: h.title,
-        cover: h.cover,
-        historyGroupIndex: h.groupIndex,
-        historyEpisodeIndex: h.episodeIndex,
-        historyPositionMs: h.positionMs,
-      );
+    id: h.videoId,
+    siteKey: h.siteKey,
+    title: h.title,
+    cover: h.cover,
+    historyGroupIndex: h.groupIndex,
+    historyEpisodeIndex: h.episodeIndex,
+    historyPositionMs: h.positionMs,
+  );
 
   /// 修复 Spider 返回的图片 URL：
   /// - Bridge proxy URL 已由服务端修正 host，无需客户端处理

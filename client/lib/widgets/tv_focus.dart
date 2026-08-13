@@ -101,11 +101,11 @@ class _TvFocusableState extends State<TvFocusable> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         Scrollable.maybeOf(context)?.position.ensureVisible(
-              context.findRenderObject()!,
-              alignment: widget.ensureVisibleAlignment,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-            );
+          context.findRenderObject()!,
+          alignment: widget.ensureVisibleAlignment,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+        );
       });
     }
   }
@@ -208,8 +208,8 @@ class TvFocusRing extends StatelessWidget {
     final borderColor = focused
         ? AppColors.netflixRed
         : (shape == TvFocusRingShape.leftBar
-            ? Colors.transparent
-            : Colors.transparent);
+              ? Colors.transparent
+              : Colors.transparent);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),

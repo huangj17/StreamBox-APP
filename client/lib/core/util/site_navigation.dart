@@ -33,10 +33,7 @@ Future<void> navigateToVideoDetail(
         duration: const Duration(seconds: 4),
         action: SnackBarAction(
           label: '去搜索',
-          onPressed: () => context.push(
-            '/search',
-            extra: {'keyword': title},
-          ),
+          onPressed: () => context.push('/search', extra: {'keyword': title}),
         ),
       ),
     );
@@ -44,13 +41,16 @@ Future<void> navigateToVideoDetail(
   }
 
   if (!context.mounted) return;
-  context.push('/detail', extra: {
-    'site': matched.first,
-    'videoId': videoId,
-    'initialGroupIndex': ?initialGroupIndex,
-    'initialEpisodeIndex': ?initialEpisodeIndex,
-    'initialPositionMs': ?initialPositionMs,
-  });
+  context.push(
+    '/detail',
+    extra: {
+      'site': matched.first,
+      'videoId': videoId,
+      'initialGroupIndex': ?initialGroupIndex,
+      'initialEpisodeIndex': ?initialEpisodeIndex,
+      'initialPositionMs': ?initialPositionMs,
+    },
+  );
 }
 
 /// 当前是否还有该 [siteKey] 的活跃源。用于历史/收藏 tile 视觉降级判断。

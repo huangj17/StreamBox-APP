@@ -249,10 +249,7 @@ class _SideNavItemState extends State<_SideNavItem> {
           onTap: widget.onTap,
           behavior: HitTestBehavior.opaque,
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 4,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: [
                 // 选中红条指示器
@@ -292,11 +289,7 @@ class _SideNavItemState extends State<_SideNavItem> {
                         final showText = constraints.maxWidth >= 60;
                         return Row(
                           children: [
-                            Icon(
-                              widget.spec.icon,
-                              size: 24,
-                              color: _iconColor,
-                            ),
+                            Icon(widget.spec.icon, size: 24, color: _iconColor),
                             if (showText) ...[
                               const SizedBox(width: 16),
                               Expanded(
@@ -304,7 +297,8 @@ class _SideNavItemState extends State<_SideNavItem> {
                                   widget.spec.label,
                                   style: AppTypography.body.copyWith(
                                     color: _labelColor,
-                                    fontWeight: (widget.isSelected ||
+                                    fontWeight:
+                                        (widget.isSelected ||
                                             _focused ||
                                             _hovered)
                                         ? FontWeight.w600

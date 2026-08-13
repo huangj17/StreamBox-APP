@@ -67,8 +67,7 @@ void main() {
         return i;
       }
 
-      final futures =
-          List.generate(6, (i) => pool.run(() => task(i)));
+      final futures = List.generate(6, (i) => pool.run(() => task(i)));
       final results = await Future.wait(futures);
 
       expect(results, [0, 1, 2, 3, 4, 5]);
@@ -79,11 +78,13 @@ void main() {
       final pool = FetchPool(maxConcurrent: 1);
       final outcomes = <String>[];
 
-      final f1 = pool.run<void>(() async {
-        throw StateError('boom');
-      }).catchError((_) {
-        outcomes.add('caught');
-      });
+      final f1 = pool
+          .run<void>(() async {
+            throw StateError('boom');
+          })
+          .catchError((_) {
+            outcomes.add('caught');
+          });
       final f2 = pool.run<void>(() async {
         outcomes.add('ran');
       });

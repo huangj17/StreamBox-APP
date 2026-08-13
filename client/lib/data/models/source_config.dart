@@ -17,15 +17,18 @@ class SourceConfig {
 
   factory SourceConfig.fromJson(Map<String, dynamic> json) {
     return SourceConfig(
-      spider: json['spider'] as String?,
-      sites: (json['sites'] as List<dynamic>? ?? [])
-          .map((e) => Site.fromJson(e as Map<String, dynamic>))
+      spider: json['spider']?.toString(),
+      sites: (json['sites'] is List ? json['sites'] as List : const [])
+          .whereType<Map>()
+          .map((e) => Site.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
-      lives: (json['lives'] as List<dynamic>? ?? [])
-          .map((e) => LiveSource.fromJson(e as Map<String, dynamic>))
+      lives: (json['lives'] is List ? json['lives'] as List : const [])
+          .whereType<Map>()
+          .map((e) => LiveSource.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
-      parses: (json['parses'] as List<dynamic>? ?? [])
-          .map((e) => ParseRule.fromJson(e as Map<String, dynamic>))
+      parses: (json['parses'] is List ? json['parses'] as List : const [])
+          .whereType<Map>()
+          .map((e) => ParseRule.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
   }
@@ -53,9 +56,13 @@ class LiveSource {
   });
 
   factory LiveSource.fromJson(Map<String, dynamic> json) => LiveSource(
-    name: json['name'] as String? ?? '',
-    url: json['url'] as String? ?? '',
-    playerType: json['playerType'] as int? ?? 0,
+    name: json['name']?.toString() ?? '',
+    url: json['url']?.toString() ?? '',
+    playerType: switch (json['playerType']) {
+      final num value => value.toInt(),
+      final String value => int.tryParse(value) ?? 0,
+      _ => 0,
+    },
   );
 }
 
@@ -67,7 +74,7 @@ class ParseRule {
   const ParseRule({required this.name, required this.url});
 
   factory ParseRule.fromJson(Map<String, dynamic> json) => ParseRule(
-    name: json['name'] as String? ?? '',
-    url: json['url'] as String? ?? '',
+    name: json['name']?.toString() ?? '',
+    url: json['url']?.toString() ?? '',
   );
 }

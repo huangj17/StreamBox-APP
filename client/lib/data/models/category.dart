@@ -1,6 +1,6 @@
 /// 分类类型
 enum CategoryType {
-  fixed,   // 固定行：继续观看等，数据来自本地
+  fixed, // 固定行：继续观看等，数据来自本地
   dynamic, // 动态行：来自苹果 CMS ?ac=class 接口
 }
 
@@ -10,6 +10,7 @@ class Category {
   final String name;
   final String siteKey;
   final CategoryType type;
+
   /// 父分类 ID；0 表示顶级父分类（自身无内容），>0 表示子分类（有内容）
   final int typePid;
 
@@ -21,14 +22,20 @@ class Category {
     this.typePid = 0,
   });
 
-  factory Category.fromJson(Map<String, dynamic> json, {required String siteKey}) =>
-      Category(
-        id: json['type_id'].toString(),
-        name: json['type_name'] as String,
-        siteKey: siteKey,
-        type: CategoryType.dynamic,
-        typePid: (json['type_pid'] as num?)?.toInt() ?? 0,
-      );
+  factory Category.fromJson(
+    Map<String, dynamic> json, {
+    required String siteKey,
+  }) => Category(
+    id: json['type_id'].toString(),
+    name: json['type_name']?.toString() ?? '',
+    siteKey: siteKey,
+    type: CategoryType.dynamic,
+    typePid: switch (json['type_pid']) {
+      final num value => value.toInt(),
+      final String value => int.tryParse(value) ?? 0,
+      _ => 0,
+    },
+  );
 }
 
 /// 预定义的固定行

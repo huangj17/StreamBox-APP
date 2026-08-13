@@ -15,7 +15,8 @@ class PlayerSettingsStorage {
   }
 
   /// 是否使用硬件解码（默认开启）
-  bool get hardwareDecode => _box.get(_keyHardwareDecode, defaultValue: true) as bool;
+  bool get hardwareDecode =>
+      _box.get(_keyHardwareDecode, defaultValue: true) as bool;
   set hardwareDecode(bool value) => _box.put(_keyHardwareDecode, value);
 
   /// 默认播放倍速（1.0 = 正常）

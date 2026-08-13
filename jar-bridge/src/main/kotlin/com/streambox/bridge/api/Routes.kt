@@ -21,7 +21,9 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject
 import org.slf4j.LoggerFactory
+import java.nio.charset.StandardCharsets
 import java.util.Base64
+import java.util.HashMap
 
 private val json = Json { prettyPrint = false }
 private val routeLogger = LoggerFactory.getLogger("Routes")
@@ -30,6 +32,8 @@ private val routeLogger = LoggerFactory.getLogger("Routes")
 /// 捕获第二个 scheme 起的部分。仅在 JSON 字符串值（前面有 `"`）的位置生效，
 /// 避免误伤含 https:// 的正文。
 private val doubleSchemeRegex = Regex("\"https?://[^\"\\s]*?(https?://[^\"\\s]+)")
+private val categoryRoutingParameters = setOf("ac", "t", "pg", "ids", "wd")
+private val blockedSpiderExtendParameters = setOf("url", "host", "target", "gatewayurl", "apikey")
 private var startTime = System.currentTimeMillis()
 
 @Serializable
@@ -149,14 +153,28 @@ fun Application.configureRoutes(
                         "Unsupported content query",
                     )
                 }
+                val queryEntries = call.request.queryParameters.entries().flatMap { (name, values) ->
+                    values.map { value -> name to value }
+                }
+                val categoryExtend = HashMap<String, String>().apply {
+                    queryEntries.forEach { (name, value) ->
+                        val normalized = name.lowercase()
+                        if (normalized !in categoryRoutingParameters &&
+                            normalized !in blockedSpiderExtendParameters
+                        ) {
+                            put(name, value)
+                        }
+                    }
+                }
 
-                // 缓存键：仅 ?ac=class（首页分类）和 ?ac=detail&t=X&pg=Y（分类页）走缓存。
+                // 缓存键：仅 ?ac=class（首页分类）和分类页走缓存。分类页必须包含
+                // 完整规范化查询，避免 year/area/lang 等筛选之间互相污染。
                 // detail by ids / search 不缓存（用户级查询）。
                 val cacheKey: String? = when {
                     operation == "class" ->
                         "${catalogManager.current().version}:$key:class"
                     operation == "category" ->
-                        "${catalogManager.current().version}:$key:t=$t:pg=$pg"
+                        "${catalogManager.current().version}:$key:category:${canonicalQuery(queryEntries)}"
                     else -> null
                 }
 
@@ -171,7 +189,7 @@ fun Application.configureRoutes(
                         operation == "detail" ->
                             handler.runtime.detailContent(checkNotNull(ids).split(","))
                         operation == "category" ->
-                            handler.runtime.categoryContent(checkNotNull(t), pg, true, hashMapOf())
+                            handler.runtime.categoryContent(checkNotNull(t), pg, true, categoryExtend)
                         operation == "search" ->
                             handler.runtime.searchContent(checkNotNull(wd), quick = false)
                         else -> handler.runtime.homeContent(filter = true)
@@ -182,9 +200,7 @@ fun Application.configureRoutes(
                                 handler = handler,
                                 catalogVersion = catalogManager.current().version,
                                 entryKey = key,
-                                query = call.request.queryParameters.entries().flatMap { (name, values) ->
-                                    values.map { value -> name to value }
-                                },
+                                query = queryEntries,
                             ),
                         )
                     } catch (error: CmsProxyException) {
@@ -196,7 +212,7 @@ fun Application.configureRoutes(
                 // 下次命中也会被 502，60s 后过期，acceptable）
                 if (cacheKey != null) {
                     result.onSuccess { jsonStr ->
-                        if (jsonStr.isNotBlank() && jsonStr.length <= maxResponseBytes) {
+                        if (jsonStr.isNotBlank() && jsonStr.utf8Size() <= maxResponseBytes) {
                             ResponseCache.put(cacheKey, jsonStr)
                         }
                     }
@@ -335,7 +351,7 @@ private suspend fun ApplicationCall.respondResult(
     result.fold(
         onSuccess = { jsonStr ->
             // 校验返回的 JSON 是否合法
-            if (jsonStr.length > maxResponseBytes) {
+            if (jsonStr.utf8Size() > maxResponseBytes) {
                 respondError(502, "Plugin response exceeds configured size limit")
             } else if (jsonStr.isBlank() || (!jsonStr.trimStart().startsWith("{") && !jsonStr.trimStart().startsWith("["))) {
                 respondError(502, "Invalid response from plugin")
@@ -364,6 +380,13 @@ private suspend fun ApplicationCall.respondResult(
         }
     )
 }
+
+private fun canonicalQuery(entries: List<Pair<String, String>>): String = entries
+    .filterNot { (name, _) -> name.equals("ac", ignoreCase = true) }
+    .sortedWith(compareBy<Pair<String, String>>({ it.first }, { it.second }))
+    .joinToString("|") { (name, value) -> "${name.length}:$name=${value.length}:$value" }
+
+private fun String.utf8Size(): Long = toByteArray(StandardCharsets.UTF_8).size.toLong()
 
 private suspend fun ApplicationCall.respondSpiderPlayResult(
     result: Result<String>,

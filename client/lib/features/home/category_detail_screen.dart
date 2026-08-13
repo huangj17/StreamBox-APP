@@ -37,6 +37,7 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
   int _page = 1;
   int _pageCount = 1;
   bool _loading = false;
+  Object? _loadError;
   int _loadGeneration = 0;
 
   String? _selectedYear;
@@ -69,7 +70,10 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
     final generation = _loadGeneration;
     final requestedPage = _page;
     final requestedYear = _selectedYear;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadError = null;
+    });
 
     try {
       final api = ref.read(cmsApiProvider);
@@ -85,11 +89,16 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
         _pageCount = result.pageCount;
         _page = requestedPage + 1;
         _loading = false;
+        _loadError = null;
         _invalidateSortCache();
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted || generation != _loadGeneration) return;
-      setState(() => _loading = false);
+      debugPrint('分类页加载失败: $error');
+      setState(() {
+        _loading = false;
+        _loadError = error;
+      });
     }
   }
 
@@ -101,6 +110,7 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
       _page = 1;
       _pageCount = 1;
       _loading = false;
+      _loadError = null;
     });
     unawaited(_loadPage());
   }
@@ -195,6 +205,8 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
                       color: AppColors.netflixRed,
                     ),
                   )
+                : _items.isEmpty && _loadError != null
+                ? _CategoryLoadError(onRetry: _loadPage)
                 : _items.isEmpty && !_loading
                 ? Center(
                     child: Text(
@@ -222,17 +234,26 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
                       crossAxisSpacing: AppSpacing.md,
                       mainAxisSpacing: AppSpacing.md + 40,
                     ),
-                    itemCount: sorted.length + (_page <= _pageCount ? 1 : 0),
+                    itemCount:
+                        sorted.length +
+                        (_page <= _pageCount && (_loading || _loadError != null)
+                            ? 1
+                            : 0),
                     itemBuilder: (context, index) {
                       if (index >= sorted.length) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(AppSpacing.md),
-                            child: CircularProgressIndicator(
-                              color: AppColors.netflixRed,
-                              strokeWidth: 2,
-                            ),
-                          ),
+                        return Center(
+                          child: _loadError != null
+                              ? TextButton(
+                                  onPressed: _loadPage,
+                                  child: const Text('加载失败，点击重试'),
+                                )
+                              : const Padding(
+                                  padding: EdgeInsets.all(AppSpacing.md),
+                                  child: CircularProgressIndicator(
+                                    color: AppColors.netflixRed,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
                         );
                       }
                       final video = sorted[index];
@@ -264,6 +285,31 @@ class _CategoryDetailScreenState extends ConsumerState<CategoryDetailScreen> {
           color: isSelected ? AppColors.netflixRed : AppColors.primaryText,
           fontSize: 14,
         ),
+      ),
+    );
+  }
+}
+
+class _CategoryLoadError extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _CategoryLoadError({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_off, color: AppColors.hintText, size: 40),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            '加载失败，请检查网络或片源状态',
+            style: AppTypography.body.copyWith(color: AppColors.hintText),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextButton(onPressed: onRetry, child: const Text('重试')),
+        ],
       ),
     );
   }

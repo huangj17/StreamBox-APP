@@ -15,16 +15,16 @@ class CachedCover {
   });
 
   Map<String, dynamic> toJson() => {
-        'url': url,
-        'source': source,
-        'fetchedAt': fetchedAt,
-      };
+    'url': url,
+    'source': source,
+    'fetchedAt': fetchedAt,
+  };
 
   factory CachedCover.fromJson(Map<String, dynamic> m) => CachedCover(
-        url: m['url'] as String?,
-        source: (m['source'] as String?) ?? 'unknown',
-        fetchedAt: (m['fetchedAt'] as num?)?.toInt() ?? 0,
-      );
+    url: m['url'] as String?,
+    source: (m['source'] as String?) ?? 'unknown',
+    fetchedAt: (m['fetchedAt'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// 第三方封面查询结果缓存：命中 30 天，miss 24 小时
@@ -48,8 +48,9 @@ class CoverCache {
     final raw = _box.get(key) as String?;
     if (raw == null) return null;
     try {
-      final entry =
-          CachedCover.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      final entry = CachedCover.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
       final age = DateTime.now().millisecondsSinceEpoch - entry.fetchedAt;
       final ttl = entry.url == null ? _missTtlMs : _hitTtlMs;
       if (age > ttl) {
@@ -64,7 +65,11 @@ class CoverCache {
   }
 
   Future<void> putHit(
-      String title, String? year, String url, String source) async {
+    String title,
+    String? year,
+    String url,
+    String source,
+  ) async {
     final entry = CachedCover(
       url: url,
       source: source,
@@ -90,8 +95,9 @@ class CoverCache {
       final raw = _box.get(key) as String?;
       if (raw == null) continue;
       try {
-        final entry =
-            CachedCover.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        final entry = CachedCover.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
         if (entry.url == null) toDelete.add(key);
       } catch (_) {
         toDelete.add(key);

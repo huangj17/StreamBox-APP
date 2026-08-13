@@ -7,6 +7,13 @@ import '../models/source_config.dart';
 import '../models/site.dart';
 import '../models/warehouse.dart';
 
+class ParsedSourceDocument {
+  final SourceConfig? config;
+  final List<Warehouse> warehouses;
+
+  const ParsedSourceDocument({this.config, this.warehouses = const []});
+}
+
 /// TVBox 配置源解析器
 /// 下载 URL → 解析 JSON → 提取 sites 列表
 /// 支持单仓（sites 数组）和多仓（urls / storeHouse 数组）格式
@@ -21,6 +28,16 @@ class SourceParser {
   Future<SourceConfig> parse(String url) async {
     final json = await _fetchJson(url);
     return SourceConfig.fromJson(json);
+  }
+
+  /// 下载一次配置文档，同时判断它是单仓还是多仓。
+  Future<ParsedSourceDocument> parseDocument(String url) async {
+    final json = await _fetchJson(url);
+    final warehouses = _tryParseWarehouses(json);
+    if (warehouses != null && warehouses.isNotEmpty) {
+      return ParsedSourceDocument(warehouses: warehouses);
+    }
+    return ParsedSourceDocument(config: SourceConfig.fromJson(json));
   }
 
   /// 尝试将 URL 解析为多仓配置
@@ -84,20 +101,37 @@ class SourceParser {
   /// 苹果 CMS API 通常包含 api.php/provide/vod
   static bool isCmsApiUrl(String url) {
     final lower = url.toLowerCase();
-    return lower.contains('api.php') || lower.contains('provide/vod');
+    return lower.contains('api.php') ||
+        lower.contains('provide/vod') ||
+        isJarBridgePluginUrl(url);
+  }
+
+  /// Bridge 单插件 CMS 兼容端点，例如 http://127.0.0.1:9978/api/doll。
+  static bool isJarBridgePluginUrl(String url) {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || uri.port != 9978) return false;
+    final segments = uri.pathSegments.where((part) => part.isNotEmpty).toList();
+    return segments.length >= 2 &&
+        segments[segments.length - 2].toLowerCase() == 'api' &&
+        segments.last.isNotEmpty;
   }
 
   /// 判断 URL 是否是 JAR Bridge 服务**根地址**（用于自动发现 /api/list）。
   /// 含 `/api/<key>` 的子路径不算 —— 那是单个插件的 CMS 端点，按普通 CMS 源处理，
   /// 这样用户可以手动添加 `http://<bridge>:9978/api/<key>` 形式访问 hidden 插件。
   static bool isJarBridgeUrl(String url) {
-    final lower = url.toLowerCase();
-    if (!lower.contains(':9978')) return false;
-    // 提取 :9978 后的路径部分
-    final idx = lower.indexOf(':9978');
-    final afterPort = lower.substring(idx + ':9978'.length);
-    // 路径只能为空、'/'、或非 /api/ 开头
-    return !afterPort.contains('/api/');
+    final uri = Uri.tryParse(url.trim());
+    return uri != null && uri.port == 9978 && !isJarBridgePluginUrl(url);
+  }
+
+  /// 无路径的 HTTPS 地址可能是反向代理后的 Gateway；有明确配置文件路径的
+  /// URL 不做 /api/list 探测，避免普通配置源额外等待 2 秒。
+  static bool shouldProbeGateway(String url) {
+    if (isJarBridgeUrl(url)) return true;
+    final uri = Uri.tryParse(url.trim());
+    return uri != null &&
+        (uri.path.isEmpty || uri.path == '/') &&
+        !uri.hasQuery;
   }
 
   /// 解析 JAR Bridge 服务，通过 /api/list 发现所有可用插件
@@ -209,7 +243,35 @@ class SourceParser {
 
   /// 将普通 CMS API URL 包装为 SourceConfig
   static SourceConfig wrapCmsUrl(String url) {
-    final validated = UrlPolicy.requireCmsApiUrl(url);
+    final directBridge = isJarBridgePluginUrl(url);
+    final validated = UrlPolicy.requireCmsApiUrl(
+      url,
+      allowLoopback: directBridge,
+    );
+    if (directBridge) {
+      final segments = validated.pathSegments
+          .where((part) => part.isNotEmpty)
+          .toList();
+      final pluginKey = segments.last;
+      final apiIndex = segments.length - 2;
+      final basePath = segments.take(apiIndex).join('/');
+      final gatewayUri = validated.replace(
+        path: basePath.isEmpty ? '' : '/$basePath',
+        query: null,
+      );
+      return SourceConfig(
+        sites: [
+          Site.fromGateway(
+            gatewayUrl: gatewayUri.toString().replaceFirst(RegExp(r'/$'), ''),
+            key: pluginKey,
+            name: pluginKey,
+            apiPath: validated.toString(),
+            kind: SiteSourceKind.manual,
+            status: GatewaySourceStatus.ready,
+          ),
+        ],
+      );
+    }
     return SourceConfig(sites: [Site.fromUrl(validated.toString())]);
   }
 }

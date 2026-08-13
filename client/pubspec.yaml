@@ -30,6 +30,8 @@ dependencies:
   window_manager: ^0.4.0
   flutter_cache_manager: ^3.4.1
   path_provider: ^2.1.5
+  package_info_plus: ^9.0.1
+  xml: ^6.6.1
   # 播放期间保持屏幕常亮，防止 TV（尤其酷开）触发屏保后杀掉 App
   wakelock_plus: ^1.2.8
 

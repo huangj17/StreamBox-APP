@@ -21,6 +21,7 @@ Future<String> getBoundedText(
   Map<String, dynamic>? headers,
   Duration? sendTimeout,
   Duration? receiveTimeout,
+  CancelToken? cancelToken,
   required int maxBytes,
 }) async {
   final response = await dio.get<ResponseBody>(
@@ -32,6 +33,7 @@ Future<String> getBoundedText(
       sendTimeout: sendTimeout,
       receiveTimeout: receiveTimeout,
     ),
+    cancelToken: cancelToken,
   );
   final declaredLength = int.tryParse(
     response.headers.value(Headers.contentLengthHeader) ?? '',

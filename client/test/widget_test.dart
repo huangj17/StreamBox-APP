@@ -33,8 +33,7 @@ void main() {
         vodPic: '',
         vodContent: '',
         vodPlayFrom: 'source1\$\$\$source2',
-        vodPlayUrl:
-            '第1集\$http://a.com/1.m3u8\$\$\$第1集\$http://b.com/1.m3u8',
+        vodPlayUrl: '第1集\$http://a.com/1.m3u8\$\$\$第1集\$http://b.com/1.m3u8',
       );
       expect(detail.episodeGroups.length, 2);
       expect(detail.sourceNames.length, 2);
