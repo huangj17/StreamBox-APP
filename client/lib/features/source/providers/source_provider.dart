@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/local/source_storage.dart';
 import '../../../data/models/site.dart';
 import '../../../data/models/source_config.dart';
+import '../../../data/models/source_health.dart';
 import '../../../data/models/warehouse.dart';
+import '../../../data/sources/source_health_checker.dart';
 import '../../../data/sources/source_parser.dart';
 import '../../home/providers/categories_provider.dart';
 
@@ -28,6 +32,139 @@ final selectedSourceUrlProvider = StateProvider<String?>((ref) => null);
 
 /// 当前选中的仓库 URL（多仓模式下使用）
 final selectedWarehouseUrlProvider = StateProvider<String?>((ref) => null);
+
+// ── 片源健康检测 ──
+
+final sourceHealthCheckerProvider = Provider<SourceHealthChecker>((ref) {
+  return SourceHealthChecker(ref.watch(dioProvider));
+});
+
+/// 配置源 URL → 最近一次健康状态。
+///
+/// 首次恢复片源后延迟 2 秒后台检测，避免与首屏请求抢网络；
+/// 之后每 15 分钟重新检测。
+final sourceHealthProvider =
+    StateNotifierProvider<SourceHealthNotifier, Map<String, SourceHealth>>((
+      ref,
+    ) {
+      final notifier = SourceHealthNotifier(
+        ref.watch(sourceHealthCheckerProvider),
+      );
+      ref.listen<List<String>>(savedSourceUrlsProvider, (_, urls) {
+        notifier.setSources(urls);
+      }, fireImmediately: true);
+      return notifier;
+    });
+
+class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
+  static const refreshInterval = Duration(minutes: 15);
+  static const startupDelay = Duration(seconds: 2);
+  static const _concurrency = 3;
+
+  final SourceHealthChecker _checker;
+  Timer? _startupTimer;
+  Timer? _periodicTimer;
+  List<String> _sources = const [];
+  bool _refreshing = false;
+  bool _refreshQueued = false;
+  bool _disposed = false;
+
+  SourceHealthNotifier(this._checker) : super(const {});
+
+  void setSources(List<String> urls) {
+    if (_disposed) return;
+    final unique = urls.toSet().toList(growable: false);
+    final previousSources = _sources.toSet();
+    _sources = unique;
+    state = {
+      for (final url in unique)
+        url: state[url] ?? const SourceHealth.checking(),
+    };
+
+    if (unique.isEmpty) {
+      _startupTimer?.cancel();
+      _periodicTimer?.cancel();
+      _periodicTimer = null;
+      return;
+    }
+
+    _periodicTimer ??= Timer.periodic(refreshInterval, (_) {
+      unawaited(refreshAll());
+    });
+
+    final added = unique
+        .where((url) => !previousSources.contains(url))
+        .toList();
+    if (previousSources.isEmpty) {
+      _startupTimer?.cancel();
+      _startupTimer = Timer(startupDelay, () => unawaited(refreshAll()));
+    } else if (added.isNotEmpty) {
+      unawaited(_refresh(added));
+    }
+  }
+
+  Future<void> refreshAll() => _refresh(_sources);
+
+  /// 仅刷新超过 [maxAge] 未检测的片源。
+  ///
+  /// macOS 窗口每次重新获得焦点都会触发 resumed；这里避免普通切窗绕过
+  /// 15 分钟周期，仍能在应用长时间处于后台后及时补一次检测。
+  Future<void> refreshStale({Duration maxAge = refreshInterval}) {
+    final cutoff = DateTime.now().subtract(maxAge);
+    final stale = _sources
+        .where((url) {
+          final health = state[url];
+          if (health?.status == SourceHealthStatus.checking) return false;
+          final checkedAt = health?.checkedAt;
+          return checkedAt == null || checkedAt.isBefore(cutoff);
+        })
+        .toList(growable: false);
+    return _refresh(stale);
+  }
+
+  Future<void> _refresh(List<String> requested) async {
+    if (_disposed || requested.isEmpty) return;
+    if (_refreshing) {
+      _refreshQueued = true;
+      return;
+    }
+    _refreshing = true;
+    try {
+      final current = _sources.toSet();
+      final targets = requested.where(current.contains).toList(growable: false);
+      for (var offset = 0; offset < targets.length; offset += _concurrency) {
+        if (_disposed) return;
+        final end = offset + _concurrency < targets.length
+            ? offset + _concurrency
+            : targets.length;
+        final batch = targets.sublist(offset, end);
+        await Future.wait(batch.map(_checkOne));
+      }
+    } finally {
+      _refreshing = false;
+      if (_refreshQueued && !_disposed) {
+        _refreshQueued = false;
+        unawaited(refreshAll());
+      }
+    }
+  }
+
+  Future<void> _checkOne(String url) async {
+    if (!_sources.contains(url) || _disposed) return;
+    state = {...state, url: const SourceHealth.checking()};
+    final result = await _checker.check(url);
+    if (!_sources.contains(url) || _disposed) return;
+    state = {...state, url: result};
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _startupTimer?.cancel();
+    _periodicTimer?.cancel();
+    super.dispose();
+  }
+}
 
 // ── 多仓解析 ──
 

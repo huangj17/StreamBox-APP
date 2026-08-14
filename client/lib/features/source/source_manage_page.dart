@@ -10,6 +10,7 @@ import '../../core/network/url_policy.dart';
 import '../../data/local/source_storage.dart';
 import '../../data/models/site.dart';
 import '../../data/models/source_config.dart';
+import '../../data/models/source_health.dart';
 import '../../data/models/warehouse.dart';
 import '../../data/sources/source_parser.dart';
 import '../../widgets/tv_focus.dart';
@@ -243,6 +244,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     String url,
     String? selectedUrl,
     AsyncValue<List<Warehouse>> warehousesAsync,
+    Map<String, SourceHealth> healthStates,
   ) {
     final isSelected = url == selectedUrl;
     final isMultiWarehouse =
@@ -256,6 +258,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
       isSelected: isSelected,
       isLoading: _loadingUrl == url,
       isMultiWarehouse: isMultiWarehouse,
+      health: healthStates[url],
       onTap: () => _selectSource(url),
       onDelete: SourceStorage.isBuiltIn(url) ? null : () => _removeSource(url),
     );
@@ -267,6 +270,10 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     final selectedUrl = ref.watch(selectedSourceUrlProvider);
     final configAsync = ref.watch(sourceConfigProvider);
     final warehousesAsync = ref.watch(warehouseListProvider);
+    final healthStates = ref.watch(sourceHealthProvider);
+    final healthChecking = healthStates.values.any(
+      (health) => health.status == SourceHealthStatus.checking,
+    );
 
     final builtIn = savedUrls.where((u) => SourceStorage.isBuiltIn(u)).toList();
     final thirdParty = savedUrls
@@ -290,12 +297,25 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                     children: [
                       // 1. 内置片源（最上，默认展开，可折叠）
                       if (builtIn.isNotEmpty) ...[
-                        _ExpandToggleRow(
-                          expanded: _builtInExpanded,
-                          count: builtIn.length,
-                          onToggle: () => setState(
-                            () => _builtInExpanded = !_builtInExpanded,
-                          ),
+                        Row(
+                          children: [
+                            _ExpandToggleRow(
+                              expanded: _builtInExpanded,
+                              count: builtIn.length,
+                              onToggle: () => setState(
+                                () => _builtInExpanded = !_builtInExpanded,
+                              ),
+                            ),
+                            const Spacer(),
+                            _HealthRefreshButton(
+                              checking: healthChecking,
+                              onRefresh: healthChecking
+                                  ? null
+                                  : () => ref
+                                        .read(sourceHealthProvider.notifier)
+                                        .refreshAll(),
+                            ),
+                          ],
                         ),
                         if (_builtInExpanded) ...[
                           const SizedBox(height: AppSpacing.sm),
@@ -308,6 +328,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                                 url,
                                 selectedUrl,
                                 warehousesAsync,
+                                healthStates,
                               ),
                             ),
                           ),
@@ -334,6 +355,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                               url,
                               selectedUrl,
                               warehousesAsync,
+                              healthStates,
                             ),
                           ),
                         ),

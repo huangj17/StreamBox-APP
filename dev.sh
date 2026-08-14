@@ -47,7 +47,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "找不到命令 $1，请先安�
 # ---------- Gradle ----------
 # ~/.gradle/gradle.properties 里配了代理、但代理没在跑时，Gradle 会卡到超时后
 # 报 "plugin not found"。这里探测一下，不通就本次绕过（不改动全局配置）。
-GRADLE_PROXY_FLAGS=""   # 需要绕过时填入 -Dhttp.proxyHost= -Dhttps.proxyHost=
+# macOS 自带的 Bash 3.2 在 `set -u` 下不能展开空数组。把始终需要的
+# console 参数也放进数组，确保没有代理参数时数组仍非空。
+GRADLE_ARGS=("--console=plain")
 
 detect_gradle_proxy() {
   local props="$HOME/.gradle/gradle.properties" host port
@@ -60,7 +62,16 @@ detect_gradle_proxy() {
   fi
   warn "Gradle 配了代理 ${host}:${port}，但它没在运行 —— 本次绕过代理直连"
   warn "长期修复：启动代理软件，或注释掉 ${props} 里的 systemProp.*.proxy* 四行"
-  GRADLE_PROXY_FLAGS="-Dhttp.proxyHost= -Dhttps.proxyHost="
+  # Wrapper 会在解析命令行 -D 之后再加载 ~/.gradle/gradle.properties，
+  # 因此单纯清空 proxyHost 会被全局配置覆盖。nonProxyHosts 未在那四行
+  # 代理配置中定义，可以让 Wrapper 下载和后续 Gradle 请求都直连。
+  GRADLE_ARGS=(
+    "-Dhttp.proxyHost="
+    "-Dhttps.proxyHost="
+    "-Dhttp.nonProxyHosts=*"
+    "-Dhttps.nonProxyHosts=*"
+    "--console=plain"
+  )
 }
 
 # ---------- Bridge ----------
@@ -122,8 +133,7 @@ run_bridge() {
   detect_gradle_proxy
   info "启动 JAR Bridge → http://localhost:$BRIDGE_PORT"
   cd "$BRIDGE_DIR"
-  # shellcheck disable=SC2086  # flags 需要按空格拆成多个参数
-  exec ./gradlew $GRADLE_PROXY_FLAGS run --console=plain "$@"
+  exec ./gradlew "${GRADLE_ARGS[@]}" run "$@"
 }
 
 run_client() {
@@ -144,8 +154,7 @@ run_all() {
     detect_gradle_proxy
     mkdir -p "$LOG_DIR"
     info "后台启动 JAR Bridge，日志：$BRIDGE_LOG"
-    # shellcheck disable=SC2086
-    ( cd "$BRIDGE_DIR" && ./gradlew $GRADLE_PROXY_FLAGS run --console=plain ) >"$BRIDGE_LOG" 2>&1 &
+    ( cd "$BRIDGE_DIR" && ./gradlew "${GRADLE_ARGS[@]}" run ) >"$BRIDGE_LOG" 2>&1 &
     BRIDGE_WRAPPER_PID=$!
     started_by_us=1
     if wait_bridge; then
@@ -172,8 +181,7 @@ run_test() {
   ( cd "$CLIENT_DIR" && flutter analyze && flutter test )
   detect_gradle_proxy
   info "jar-bridge: gradlew test"
-  # shellcheck disable=SC2086
-  ( cd "$BRIDGE_DIR" && ./gradlew $GRADLE_PROXY_FLAGS test --console=plain )
+  ( cd "$BRIDGE_DIR" && ./gradlew "${GRADLE_ARGS[@]}" test )
   ok "全部测试通过"
 }
 
@@ -182,8 +190,7 @@ run_build() {
   info "client: flutter build macos"
   ( cd "$CLIENT_DIR" && flutter build macos )
   info "jar-bridge: gradlew build"
-  # shellcheck disable=SC2086
-  ( cd "$BRIDGE_DIR" && ./gradlew $GRADLE_PROXY_FLAGS build --console=plain )
+  ( cd "$BRIDGE_DIR" && ./gradlew "${GRADLE_ARGS[@]}" build )
   ok "构建完成"
 }
 
@@ -192,8 +199,7 @@ run_clean() {
   info "client: flutter clean"
   ( cd "$CLIENT_DIR" && flutter clean )
   info "jar-bridge: gradlew clean"
-  # shellcheck disable=SC2086
-  ( cd "$BRIDGE_DIR" && ./gradlew $GRADLE_PROXY_FLAGS clean --console=plain )
+  ( cd "$BRIDGE_DIR" && ./gradlew "${GRADLE_ARGS[@]}" clean )
   rm -rf "$LOG_DIR"
   ok "清理完成"
 }

@@ -233,6 +233,69 @@ class _ExpandToggleRow extends StatelessWidget {
   }
 }
 
+class _HealthRefreshButton extends StatelessWidget {
+  final bool checking;
+  final Future<void> Function()? onRefresh;
+
+  const _HealthRefreshButton({required this.checking, this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      debugLabel: 'source-health-refresh',
+      onActivate: onRefresh == null ? null : () => onRefresh!(),
+      builder: (context, focused) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: focused ? AppColors.netflixRed : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (checking)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    color: AppColors.info,
+                  ),
+                )
+              else
+                Icon(
+                  Icons.refresh,
+                  size: 16,
+                  color: focused
+                      ? AppColors.netflixRed
+                      : AppColors.secondaryText,
+                ),
+              const SizedBox(width: 6),
+              Text(
+                checking ? '检测中' : '重新检测',
+                style: AppTypography.caption.copyWith(
+                  color: checking
+                      ? AppColors.info
+                      : focused
+                      ? AppColors.netflixRed
+                      : AppColors.secondaryText,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 // ── 源列表 Tile ──
 
 /// 选中/焦点视觉分离：
@@ -245,6 +308,7 @@ class _SourceTile extends StatelessWidget {
   final bool isSelected;
   final bool isLoading;
   final bool isMultiWarehouse;
+  final SourceHealth? health;
   final VoidCallback onTap;
   final VoidCallback? onDelete;
 
@@ -253,6 +317,7 @@ class _SourceTile extends StatelessWidget {
     required this.isSelected,
     required this.isLoading,
     required this.isMultiWarehouse,
+    required this.health,
     required this.onTap,
     this.focusNode,
     this.onDelete,
@@ -294,6 +359,7 @@ class _SourceTile extends StatelessWidget {
             isSelected: isSelected,
             isLoading: isLoading,
             isMultiWarehouse: isMultiWarehouse,
+            health: health,
             focused: focused,
             canDelete: onDelete != null,
             onDelete: onDelete,
@@ -311,6 +377,7 @@ class _SourceTileInner extends StatelessWidget {
   final bool isSelected;
   final bool isLoading;
   final bool isMultiWarehouse;
+  final SourceHealth? health;
   final bool focused;
   final bool canDelete;
   final VoidCallback? onDelete;
@@ -321,6 +388,7 @@ class _SourceTileInner extends StatelessWidget {
     required this.isSelected,
     required this.isLoading,
     required this.isMultiWarehouse,
+    required this.health,
     required this.focused,
     required this.canDelete,
     required this.onDelete,
@@ -342,7 +410,10 @@ class _SourceTileInner extends StatelessWidget {
               isSelected ? Icons.check_circle : Icons.circle_outlined,
               color: isSelected ? AppColors.netflixRed : AppColors.hintText,
             ),
-      title: Row(
+      title: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppSpacing.sm,
+        runSpacing: 4,
         children: [
           Text(
             name,
@@ -352,7 +423,6 @@ class _SourceTileInner extends StatelessWidget {
             ),
           ),
           if (isMultiWarehouse) ...[
-            const SizedBox(width: AppSpacing.sm),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -369,7 +439,6 @@ class _SourceTileInner extends StatelessWidget {
             ),
           ],
           if (desc != null) ...[
-            const SizedBox(width: AppSpacing.sm),
             Text(
               desc!,
               style: AppTypography.caption.copyWith(
@@ -378,9 +447,20 @@ class _SourceTileInner extends StatelessWidget {
               ),
             ),
           ],
+          if (health != null) SourceHealthBadge(health!),
         ],
       ),
-      subtitle: canDelete && focused
+      subtitle: health?.status == SourceHealthStatus.unavailable
+          ? Text(
+              health!.message,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTypography.caption.copyWith(
+                color: AppColors.warning,
+                fontSize: 11,
+              ),
+            )
+          : canDelete && focused
           ? Text(
               '长按 OK 删除',
               style: AppTypography.caption.copyWith(
@@ -401,6 +481,46 @@ class _SourceTileInner extends StatelessWidget {
               ),
             )
           : null,
+    );
+  }
+}
+
+class SourceHealthBadge extends StatelessWidget {
+  final SourceHealth health;
+
+  const SourceHealthBadge(this.health, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (health.status) {
+      SourceHealthStatus.checking => ('检测中', AppColors.info),
+      SourceHealthStatus.available => ('可用', AppColors.success),
+      SourceHealthStatus.unavailable => ('不可用', AppColors.netflixRed),
+      SourceHealthStatus.unverified => ('待验证', AppColors.hintText),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withAlpha(30),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (health.status == SourceHealthStatus.checking) ...[
+            SizedBox(
+              width: 9,
+              height: 9,
+              child: CircularProgressIndicator(strokeWidth: 1.2, color: color),
+            ),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: AppTypography.caption.copyWith(color: color, fontSize: 10),
+          ),
+        ],
+      ),
     );
   }
 }

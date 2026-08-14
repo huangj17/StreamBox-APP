@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -92,8 +94,36 @@ void main() async {
   );
 }
 
-class StreamBoxApp extends StatelessWidget {
+class StreamBoxApp extends ConsumerStatefulWidget {
   const StreamBoxApp({super.key});
+
+  @override
+  ConsumerState<StreamBoxApp> createState() => _StreamBoxAppState();
+}
+
+class _StreamBoxAppState extends ConsumerState<StreamBoxApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // 提前实例化健康检测 Provider；片源从 Hive 恢复后会自动
+    // 触发首轮后台检测。
+    ref.read(sourceHealthProvider.notifier);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(sourceHealthProvider.notifier).refreshStale());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

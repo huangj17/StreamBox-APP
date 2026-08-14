@@ -25,14 +25,20 @@ class SourceParser {
   SourceParser(this._dio);
 
   /// 从 URL 下载并解析 TVBox 单仓配置
-  Future<SourceConfig> parse(String url) async {
-    final json = await _fetchJson(url);
+  Future<SourceConfig> parse(
+    String url, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
+    final json = await _fetchJson(url, redirectValidator: redirectValidator);
     return SourceConfig.fromJson(json);
   }
 
   /// 下载一次配置文档，同时判断它是单仓还是多仓。
-  Future<ParsedSourceDocument> parseDocument(String url) async {
-    final json = await _fetchJson(url);
+  Future<ParsedSourceDocument> parseDocument(
+    String url, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
+    final json = await _fetchJson(url, redirectValidator: redirectValidator);
     final warehouses = _tryParseWarehouses(json);
     if (warehouses != null && warehouses.isNotEmpty) {
       return ParsedSourceDocument(warehouses: warehouses);
@@ -42,18 +48,25 @@ class SourceParser {
 
   /// 尝试将 URL 解析为多仓配置
   /// 返回仓库列表；如果不是多仓格式则返回 null
-  Future<List<Warehouse>?> parseMultiWarehouse(String url) async {
-    final json = await _fetchJson(url);
+  Future<List<Warehouse>?> parseMultiWarehouse(
+    String url, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
+    final json = await _fetchJson(url, redirectValidator: redirectValidator);
     return _tryParseWarehouses(json);
   }
 
   /// 下载 URL 并解码为 JSON Map
-  Future<Map<String, dynamic>> _fetchJson(String url) async {
+  Future<Map<String, dynamic>> _fetchJson(
+    String url, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
     final validated = UrlPolicy.requireConfigUrl(url);
     final jsonStr = await getBoundedText(
       _dio,
       validated.toString(),
       receiveTimeout: const Duration(seconds: 15),
+      redirectValidator: redirectValidator,
       maxBytes: _maxConfigBytes,
     );
     return jsonDecode(jsonStr) as Map<String, dynamic>;
@@ -135,8 +148,14 @@ class SourceParser {
   }
 
   /// 解析 JAR Bridge 服务，通过 /api/list 发现所有可用插件
-  Future<SourceConfig> parseJarBridge(String bridgeUrl) async {
-    final config = await probeGateway(bridgeUrl);
+  Future<SourceConfig> parseJarBridge(
+    String bridgeUrl, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
+    final config = await probeGateway(
+      bridgeUrl,
+      redirectValidator: redirectValidator,
+    );
     if (config == null) {
       throw const FormatException('URL 未返回有效的 StreamBox Gateway Schema');
     }
@@ -145,7 +164,10 @@ class SourceParser {
 
   /// 短超时探测 StreamBox Gateway。仅 HTTP 200 不足以通过，必须具备
   /// `code=200` 与结构合法的 `sources` 数组。
-  Future<SourceConfig?> probeGateway(String gatewayUrl) async {
+  Future<SourceConfig?> probeGateway(
+    String gatewayUrl, {
+    RedirectUriValidator? redirectValidator,
+  }) async {
     final baseUrl = gatewayUrl.endsWith('/')
         ? gatewayUrl.substring(0, gatewayUrl.length - 1)
         : gatewayUrl;
@@ -162,6 +184,7 @@ class SourceParser {
         headers: GatewayAuth.headers,
         sendTimeout: const Duration(seconds: 2),
         receiveTimeout: const Duration(seconds: 2),
+        redirectValidator: redirectValidator,
         maxBytes: _maxGatewayListBytes,
       );
       final decoded = jsonDecode(body);
