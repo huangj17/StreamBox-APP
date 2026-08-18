@@ -101,17 +101,20 @@ jobs:
           # ...", so key off the digest itself rather than the line prefix.
           ACTUAL_CERT="$(sed -n 's/.*certificate SHA-256 digest: *//p' signer.txt \
             | head -n 1 | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
-          # The secret is pasted by hand, so accept whatever keytool/apksigner
-          # printed around it: a `SHA-256:` label, colon separators, line wraps.
-          EXPECTED_CERT="$(printf '%s' "$ANDROID_CERT_SHA256" \
-            | grep -oiE '([0-9a-f]{2}:){31}[0-9a-f]{2}|[0-9a-f]{64}' \
-            | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          # The secret is pasted by hand, so accept whatever surrounds the digest:
+          # a `SHA-256:` label, colon separators, and line wraps introduced by the
+          # terminal. Drop the separators, then keep the trailing 64 hex chars.
+          NORMALISED="$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          EXPECTED_CERT="${NORMALISED: -64}"
           if [ -z "$ACTUAL_CERT" ]; then
             echo "::error::Could not read the signer certificate from the APK" >&2
             exit 1
           fi
-          if [ -z "$EXPECTED_CERT" ]; then
-            echo "::error::ANDROID_CERT_SHA256 holds no SHA-256 digest. APK signed by: $ACTUAL_CERT" >&2
+          case "$EXPECTED_CERT" in
+            *[!0-9A-F]*|"") EXPECTED_CERT="" ;;
+          esac
+          if [ "${#EXPECTED_CERT}" -ne 64 ]; then
+            echo "::error::ANDROID_CERT_SHA256 does not end in a SHA-256 digest (${#NORMALISED} chars after dropping separators). APK signed by: $ACTUAL_CERT" >&2
             exit 1
           fi
           if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
