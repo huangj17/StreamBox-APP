@@ -116,6 +116,10 @@ flutter run -d macos
 - [ ] **国际化（i18n）** — 多语言界面
 - [ ] **主题** — 亮色 / 暗色 / 自定义强调色
 
+## 更新日志
+
+各版本变更见 [CHANGELOG.md](CHANGELOG.md)，发布产物见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
+
 ## 贡献
 
 欢迎 Issue 和 PR。提交前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)：
