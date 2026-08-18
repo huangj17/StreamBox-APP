@@ -95,9 +95,20 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-release.apk"
           "$APKSIGNER" verify "$APK"
           ACTUAL_CERT="$($APKSIGNER verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr '[:lower:]' '[:upper:]')"
-          EXPECTED_CERT="$(printf '%s' "$ANDROID_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          # The secret is pasted by hand, so accept whatever keytool/apksigner
+          # printed around it: a `SHA-256:` label, colon separators, line wraps.
+          EXPECTED_CERT="$(printf '%s' "$ANDROID_CERT_SHA256" \
+            | grep -oiE '([0-9a-f]{2}:){31}[0-9a-f]{2}|[0-9a-f]{64}' \
+            | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')"
           test -n "$ACTUAL_CERT"
-          test "$ACTUAL_CERT" = "$EXPECTED_CERT"
+          if [ -z "$EXPECTED_CERT" ]; then
+            echo "::error::ANDROID_CERT_SHA256 holds no SHA-256 digest. APK signed by: $ACTUAL_CERT" >&2
+            exit 1
+          fi
+          if [ "$ACTUAL_CERT" != "$EXPECTED_CERT" ]; then
+            echo "::error::Signing certificate mismatch. APK signed by: $ACTUAL_CERT" >&2
+            exit 1
+          fi
       - name: Rename artifact
         if: steps.signing.outputs.configured == 'true'
         working-directory: ${{ github.workspace }}
