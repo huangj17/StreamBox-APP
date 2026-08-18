@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要补构建并上传的已有 tag（如 v0.3.0）'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -18,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - name: Check Android signing secrets
         id: signing
         env:
@@ -26,6 +34,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           missing=""
@@ -38,6 +47,11 @@ jobs:
             # Release APKs are never signed with a throwaway debug key: an APK whose
             # certificate changes between releases cannot be installed over the
             # previous one. Skip the job instead, so macOS/Windows still publish.
+            if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+              # A manual run exists only to produce the APK, so silence is wrong here.
+              echo "::error::Android release signing secrets missing:$missing — see CONTRIBUTING.md#android-发布签名" >&2
+              exit 1
+            fi
             echo "::warning::Android release signing secrets missing:$missing — skipping APK build. See CONTRIBUTING.md#android-发布签名"
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
@@ -87,15 +101,19 @@ jobs:
       - name: Rename artifact
         if: steps.signing.outputs.configured == 'true'
         working-directory: ${{ github.workspace }}
-        run: mv client/build/app/outputs/flutter-apk/app-release.apk StreamBox-${{ github.ref_name }}-android.apk
-      - uses: softprops/action-gh-release@v3
+        run: mv client/build/app/outputs/flutter-apk/app-release.apk StreamBox-${{ inputs.tag || github.ref_name }}-android.apk
+      - name: Upload APK to release
         if: steps.signing.outputs.configured == 'true'
-        with:
-          files: StreamBox-${{ github.ref_name }}-android.apk
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" "StreamBox-$TAG-android.apk" --clobber
 
   macos:
     name: macOS App
     runs-on: macos-latest
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
@@ -116,6 +134,7 @@ jobs:
   windows:
     name: Windows
     runs-on: windows-latest
+    if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2

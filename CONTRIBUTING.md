@@ -66,6 +66,14 @@ Repository secrets；缺失、配置不完整或证书指纹不匹配时，发�
 证书指纹可通过 `keytool -list -v -keystore release.jks -alias <alias>` 获取。
 务必备份 keystore；丢失后将无法为已安装版本提供可直接升级的 APK。
 
+配好后，除了打 tag 会自动出包，也可以在 Actions → Release → Run workflow 里
+手动指定一个已有 tag 单独补构建 Android 包并上传到对应 Release（不会动已有的
+发布说明和桌面端产物）。命令行等价写法：
+
+```bash
+gh workflow run release.yml -f tag=v0.3.0
+```
+
 ## 行为准则
 
 保持友善与尊重。技术讨论对事不对人，不接受人身攻击或歧视性言论。
