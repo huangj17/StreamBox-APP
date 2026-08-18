@@ -12,6 +12,8 @@
   （二进制资源只读第一个网络分块，不产生大流量）
 - **苹果 CMS XML 方言解码**：此前只支持 JSON 的站点现在也能接入
 - Gateway Token 支持通过 `--dart-define=STREAMBOX_GATEWAY_TOKEN=...` 注入，无需写进片源 URL
+- **Android 正式签名安装包**：Release 产物新增 `StreamBox-v0.3.0-android.apk`（arm64-v8a / armeabi-v7a），
+  证书 SHA-256 指纹 `7620C762…A9B32F`，后续版本沿用同一证书，可直接覆盖升级
 
 ### 安全
 
