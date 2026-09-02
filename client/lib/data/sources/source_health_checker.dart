@@ -53,6 +53,15 @@ class SourceHealthChecker {
     }
   }
 
+  /// 已由配置解析器确认的 CMS 接口，无需再根据 URL 路径猜测格式。
+  Future<SourceHealth> checkCms(String sourceUrl) async {
+    try {
+      return await _checkCms(sourceUrl);
+    } catch (error) {
+      return SourceHealth.unavailable(message: _friendlyError(error));
+    }
+  }
+
   Future<SourceHealth> _checkGateway(String sourceUrl) async {
     final origin = Uri.parse(sourceUrl);
     final config = await _parser.probeGateway(

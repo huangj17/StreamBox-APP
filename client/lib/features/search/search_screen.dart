@@ -223,63 +223,87 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _buildResults(AsyncValue<List<VideoItem>> results, double hPad) {
-    return results.when(
-      loading: () => const Center(
-        child: CircularProgressIndicator(color: AppColors.netflixRed),
-      ),
-      error: (e, _) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '搜索失败: ${_friendlyError(e)}',
-              style: AppTypography.body,
-              textAlign: TextAlign.center,
+    final progress = ref.watch(searchProgressProvider);
+    return Column(
+      children: [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              progress.completed < progress.total
+                  ? '正在搜索 ${progress.completed}/${progress.total} 个片源'
+                  : '已搜索 ${progress.total} 个片源',
+              style: AppTypography.caption,
             ),
-            const SizedBox(height: AppSpacing.md),
-            TvActionButton.secondary(
-              icon: Icons.refresh,
-              label: '重试',
-              autofocus: true,
-              debugLabel: 'search-error-retry',
-              onActivate: _search,
-            ),
-          ],
+          ),
         ),
-      ),
-      data: (items) {
-        if (items.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('未找到「${_controller.text}」相关内容', style: AppTypography.body),
-                const SizedBox(height: AppSpacing.md),
-                TvActionButton.secondary(
-                  icon: Icons.refresh,
-                  label: '清空重搜',
-                  autofocus: true,
-                  debugLabel: 'search-empty-clear',
-                  onActivate: _clearSearch,
-                ),
-              ],
+        Expanded(
+          child: results.when(
+            loading: () => const Center(
+              child: CircularProgressIndicator(color: AppColors.netflixRed),
             ),
-          );
-        }
-        final autofocusFirst = _autofocusFirstResult;
-        if (autofocusFirst) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) setState(() => _autofocusFirstResult = false);
-          });
-        }
-        return _ResultGrid(
-          items: items,
-          hPad: hPad,
-          autofocusFirst: autofocusFirst,
-          onTopRowUp: () => _focusNode.requestFocus(),
-          onItemSelected: _navigateToDetail,
-        );
-      },
+            error: (e, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '搜索失败: ${_friendlyError(e)}',
+                    style: AppTypography.body,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TvActionButton.secondary(
+                    icon: Icons.refresh,
+                    label: '重试',
+                    autofocus: true,
+                    debugLabel: 'search-error-retry',
+                    onActivate: _search,
+                  ),
+                ],
+              ),
+            ),
+            data: (items) {
+              if (items.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        progress.total == 0
+                            ? '暂无可用的搜索片源，请前往设置启用或重新检测'
+                            : '未找到「${_controller.text}」相关内容',
+                        style: AppTypography.body,
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      TvActionButton.secondary(
+                        icon: Icons.refresh,
+                        label: '清空重搜',
+                        autofocus: true,
+                        debugLabel: 'search-empty-clear',
+                        onActivate: _clearSearch,
+                      ),
+                    ],
+                  ),
+                );
+              }
+              final autofocusFirst = _autofocusFirstResult;
+              if (autofocusFirst) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() => _autofocusFirstResult = false);
+                });
+              }
+              return _ResultGrid(
+                items: items,
+                hPad: hPad,
+                autofocusFirst: autofocusFirst,
+                onTopRowUp: () => _focusNode.requestFocus(),
+                onItemSelected: _navigateToDetail,
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -538,7 +562,7 @@ class _LatestGrid extends StatelessWidget {
 }
 
 /// 搜索结果网格
-class _ResultGrid extends StatelessWidget {
+class _ResultGrid extends ConsumerWidget {
   final List<VideoItem> items;
   final double hPad;
   final bool autofocusFirst;
@@ -554,7 +578,7 @@ class _ResultGrid extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final width = MediaQuery.of(context).size.width;
     final crossAxisCount = AppSpacing.gridColumns(width);
 
@@ -571,6 +595,11 @@ class _ResultGrid extends StatelessWidget {
         final video = items[index];
         return VideoCard(
           video: video,
+          sourceName: ref
+              .watch(sitesProvider)
+              .where((s) => s.key == video.siteKey)
+              .firstOrNull
+              ?.name,
           autofocus: autofocusFirst && index == 0,
           onUpEdge: index < crossAxisCount ? onTopRowUp : null,
           onSelected: () => onItemSelected(video),

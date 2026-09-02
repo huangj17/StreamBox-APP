@@ -56,7 +56,7 @@ class SourceParser {
     return _tryParseWarehouses(json);
   }
 
-  /// 下载 URL 并解码为 JSON Map
+  /// 统一 OuonnkiTV 数组/单对象与 TVBox 配置，仍由同一套 CMS 播放。
   Future<Map<String, dynamic>> _fetchJson(
     String url, {
     RedirectUriValidator? redirectValidator,
@@ -69,7 +69,45 @@ class SourceParser {
       redirectValidator: redirectValidator,
       maxBytes: _maxConfigBytes,
     );
-    return jsonDecode(jsonStr) as Map<String, dynamic>;
+    final decoded = jsonDecode(jsonStr);
+    if (decoded is List ||
+        (decoded is Map<String, dynamic> &&
+            decoded.containsKey('url') &&
+            decoded.containsKey('name'))) {
+      final entries = decoded is List ? decoded : [decoded];
+      final sites = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      for (final entry in entries) {
+        if (entry is! Map ||
+            entry['url'] is! String ||
+            entry['name'] is! String) {
+          throw const FormatException('片源列表中的每一项都需要名称和接口地址');
+        }
+        final api = (entry['url'] as String).trim();
+        final name = (entry['name'] as String).trim();
+        final uri = Uri.tryParse(api);
+        if (name.isEmpty ||
+            uri == null ||
+            !uri.hasAuthority ||
+            !['http', 'https'].contains(uri.scheme)) {
+          throw const FormatException('片源名称或接口地址无效');
+        }
+        final identity = Site.canonicalApi(api);
+        if (!seen.add(identity)) continue;
+        sites.add({
+          'key': 'cms:$identity',
+          'name': name,
+          'type': 3,
+          'api': api,
+          'isEnabled': entry['isEnabled'] ?? true,
+        });
+      }
+      return {'sites': sites};
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('配置需要是 TVBox 对象或 CMS 片源列表');
+    }
+    return decoded;
   }
 
   /// 尝试从 JSON 中提取多仓仓库列表
@@ -115,6 +153,7 @@ class SourceParser {
   static bool isCmsApiUrl(String url) {
     final lower = url.toLowerCase();
     return lower.contains('api.php') ||
+        lower.contains('/inc/apijson.php') ||
         lower.contains('provide/vod') ||
         isJarBridgePluginUrl(url);
   }

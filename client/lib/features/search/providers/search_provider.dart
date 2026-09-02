@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/video_item.dart';
+import '../../../data/models/site.dart';
 import '../../../data/models/video_list_result.dart';
 import '../../home/providers/categories_provider.dart';
 
@@ -11,19 +12,26 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
   static const _perSiteBudget = Duration(seconds: 4);
   int _generation = 0;
   List<CancelToken> _activeTokens = [];
+  bool _disposed = false;
 
   @override
   Future<List<VideoItem>> build() async {
-    ref.onDispose(_cancelActiveSearch);
+    ref.onDispose(() {
+      _disposed = true;
+      _cancelActiveSearch();
+    });
+    ref.listen<List<Site>>(sitesProvider, (previous, next) {
+      String signature(List<Site> sites) =>
+          sites.map((s) => '${s.key}:${s.api}:${s.searchable}').join('|');
+      if (previous != null && signature(previous) != signature(next)) clear();
+    });
     return [];
   }
 
   Future<void> search(String keyword) async {
     final trimmed = keyword.trim();
     if (trimmed.isEmpty) {
-      _generation++;
-      _cancelActiveSearch();
-      state = const AsyncValue.data([]);
+      clear();
       return;
     }
 
@@ -36,50 +44,83 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
 
     state = const AsyncValue.loading();
     try {
-      final sites = ref.read(sitesProvider);
+      final sites = ref.read(searchSitesProvider);
       final api = ref.read(cmsApiProvider);
       final eligibleSites = sites
           .where((site) => site.isEnabled && site.searchable)
           .toList();
       final tokens = List.generate(eligibleSites.length, (_) => CancelToken());
       _activeTokens = tokens;
-
-      final futures = eligibleSites.indexed.map((entry) async {
-        final (index, site) = entry;
-        final token = tokens[index];
-        try {
-          return await api
-              .search(site: site, keyword: trimmed, cancelToken: token)
-              .timeout(
-                _perSiteBudget,
-                onTimeout: () {
-                  token.cancel('搜索数据源超时');
-                  return const VideoListResult(
-                    items: [],
-                    total: 0,
-                    pageCount: 1,
-                  );
-                },
-              );
-        } catch (_) {
-          return const VideoListResult(items: [], total: 0, pageCount: 1);
+      ref.read(searchProgressProvider.notifier).state = (
+        completed: 0,
+        total: eligibleSites.length,
+      );
+      final items = <VideoItem>[];
+      var nextIndex = 0;
+      var completed = 0;
+      Future<void> worker() async {
+        while (nextIndex < eligibleSites.length &&
+            !_disposed &&
+            generation == _generation) {
+          final index = nextIndex++;
+          final site = eligibleSites[index];
+          final token = tokens[index];
+          try {
+            final result = await api
+                .search(site: site, keyword: trimmed, cancelToken: token)
+                .timeout(
+                  _perSiteBudget,
+                  onTimeout: () {
+                    token.cancel('搜索数据源超时');
+                    return const VideoListResult(
+                      items: [],
+                      total: 0,
+                      pageCount: 1,
+                    );
+                  },
+                );
+            if (_disposed || generation != _generation) return;
+            items.addAll(result.items);
+          } catch (_) {
+            if (_disposed || generation != _generation) return;
+          }
+          completed++;
+          ref.read(searchProgressProvider.notifier).state = (
+            completed: completed,
+            total: eligibleSites.length,
+          );
+          if (items.isNotEmpty) {
+            state = AsyncValue.data(List.unmodifiable(items));
+          }
         }
-      });
+      }
 
-      final results = await Future.wait(futures);
-      if (generation != _generation) return;
-      state = AsyncValue.data(results.expand((r) => r.items).toList());
+      await Future.wait(
+        List.generate(eligibleSites.length.clamp(0, 4), (_) => worker()),
+      );
+      if (_disposed || generation != _generation) return;
+      state = AsyncValue.data(List.unmodifiable(items));
     } catch (error, stackTrace) {
       if (generation != _generation) return;
-      state = AsyncValue.error(error, stackTrace);
+      if (!_disposed && generation == _generation) {
+        state = AsyncValue.error(error, stackTrace);
+      }
     } finally {
-      if (generation == _generation) _activeTokens = [];
+      if (!_disposed && generation == _generation) {
+        _activeTokens = [];
+        final progress = ref.read(searchProgressProvider);
+        ref.read(searchProgressProvider.notifier).state = (
+          completed: progress.total,
+          total: progress.total,
+        );
+      }
     }
   }
 
   void clear() {
     _generation++;
     _cancelActiveSearch();
+    ref.read(searchProgressProvider.notifier).state = (completed: 0, total: 0);
     state = const AsyncValue.data([]);
   }
 
@@ -90,6 +131,10 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
     _activeTokens = [];
   }
 }
+
+final searchProgressProvider = StateProvider<({int completed, int total})>(
+  (ref) => (completed: 0, total: 0),
+);
 
 final searchProvider = AsyncNotifierProvider<SearchNotifier, List<VideoItem>>(
   SearchNotifier.new,
@@ -105,7 +150,7 @@ final searchHistoryProvider = Provider<List<String>>((ref) {
 final latestUpdatesProvider = FutureProvider.autoDispose<List<VideoItem>>((
   ref,
 ) async {
-  final sites = ref.watch(sitesProvider);
+  final sites = ref.watch(homeSitesProvider);
   if (sites.isEmpty) return [];
 
   final api = ref.read(cmsApiProvider);

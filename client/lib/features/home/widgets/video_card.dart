@@ -16,6 +16,7 @@ import 'home_focus_anchors.dart';
 /// Focus：同 Hover + 红色边框
 class VideoCard extends StatefulWidget {
   final VideoItem video;
+  final String? sourceName;
   final WatchHistory? history;
   final VoidCallback onSelected;
   final VoidCallback onFocused;
@@ -32,6 +33,7 @@ class VideoCard extends StatefulWidget {
   const VideoCard({
     super.key,
     required this.video,
+    this.sourceName,
     this.history,
     required this.onSelected,
     required this.onFocused,
@@ -229,6 +231,16 @@ class _VideoCardState extends State<VideoCard> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            if (widget.sourceName != null)
+                              Text(
+                                widget.sourceName!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppTypography.caption.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                ),
+                              ),
                             Text(
                               widget.video.title,
                               maxLines: 2,

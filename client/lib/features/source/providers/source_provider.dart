@@ -10,6 +10,7 @@ import '../../../data/models/warehouse.dart';
 import '../../../data/sources/source_health_checker.dart';
 import '../../../data/sources/source_parser.dart';
 import '../../home/providers/categories_provider.dart';
+import 'source_library_provider.dart';
 
 // ── 基础设施 ──
 
@@ -49,12 +50,22 @@ final sourceHealthProvider =
     ) {
       final notifier = SourceHealthNotifier(
         ref.watch(sourceHealthCheckerProvider),
+        cmsOnly: true,
       );
-      ref.listen<List<String>>(savedSourceUrlsProvider, (_, urls) {
+      ref.listen<List<String>>(sourceHealthUrlsProvider, (_, urls) {
         notifier.setSources(urls);
       }, fireImmediately: true);
       return notifier;
     });
+
+final sourceHealthUrlsProvider = Provider<List<String>>((ref) {
+  final library = ref.watch(sourceLibraryProvider);
+  return library.allSites
+      .where((s) => s.isSupported)
+      .map((s) => s.api)
+      .toSet()
+      .toList();
+});
 
 class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   static const refreshInterval = Duration(minutes: 15);
@@ -62,6 +73,7 @@ class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   static const _concurrency = 3;
 
   final SourceHealthChecker _checker;
+  final bool cmsOnly;
   Timer? _startupTimer;
   Timer? _periodicTimer;
   List<String> _sources = const [];
@@ -69,7 +81,7 @@ class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   bool _refreshQueued = false;
   bool _disposed = false;
 
-  SourceHealthNotifier(this._checker) : super(const {});
+  SourceHealthNotifier(this._checker, {this.cmsOnly = false}) : super(const {});
 
   void setSources(List<String> urls) {
     if (_disposed) return;
@@ -104,6 +116,7 @@ class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   }
 
   Future<void> refreshAll() => _refresh(_sources);
+  Future<void> refreshUrls(List<String> urls) => _refresh(urls);
 
   /// 仅刷新超过 [maxAge] 未检测的片源。
   ///
@@ -152,7 +165,7 @@ class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   Future<void> _checkOne(String url) async {
     if (!_sources.contains(url) || _disposed) return;
     state = {...state, url: const SourceHealth.checking()};
-    final result = await _checker.check(url);
+    final result = await (cmsOnly ? _checker.checkCms(url) : _checker.check(url));
     if (!_sources.contains(url) || _disposed) return;
     state = {...state, url: result};
   }
@@ -274,10 +287,3 @@ final availableSitesProvider = Provider<List<Site>>((ref) {
       ) ??
       [];
 });
-
-/// 同步 availableSites 到 Home 模块的 sitesProvider
-/// 在 source_manage_page 中调用
-void syncSitesToHome(WidgetRef ref) {
-  final sites = ref.read(availableSitesProvider);
-  ref.read(sitesProvider.notifier).state = sites;
-}

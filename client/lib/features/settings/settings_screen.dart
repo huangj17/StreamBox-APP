@@ -48,186 +48,245 @@ extension on _SettingsSection {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  /// 手机：null 表示在「列表」状态，非空表示已进入某个二级页
-  /// 桌面/平板：null 时视为默认选中「配置源」，由 `_effectiveSelected` 统一处理
   _SettingsSection? _selected;
-
-  _SettingsSection get _effectiveSelected =>
-      _selected ?? _SettingsSection.source;
-
-  /// 右栏 traversal 锚点 — 不参与遍历但作为 [nextFocus] 起点。
-  /// 不用 [FocusScope]：FocusScope 是 directional traversal 边界，会让 ← 进不到左栏。
-  final FocusNode _rightAnchor = FocusNode(
-    debugLabel: 'settings-right-anchor',
+  bool _detailFocused = false;
+  final _sidebarNodes = {
+    for (final section in _SettingsSection.values)
+      section: FocusNode(debugLabel: 'settings-nav-${section.name}'),
+  };
+  final _backFocus = FocusNode(debugLabel: 'settings-back');
+  final _sourceEntry = FocusNode(debugLabel: 'source-group-builtin');
+  final _rightAnchor = FocusNode(
+    debugLabel: 'settings-content',
     skipTraversal: true,
     canRequestFocus: false,
   );
 
+  _SettingsSection get _effectiveSelected =>
+      _selected ?? _SettingsSection.source;
+  bool get _compact =>
+      !PlatformService.isTv && MediaQuery.sizeOf(context).width < 720;
+
   @override
   void dispose() {
+    for (final node in _sidebarNodes.values) {
+      node.dispose();
+    }
+    _backFocus.dispose();
+    _sourceEntry.dispose();
     _rightAnchor.dispose();
     super.dispose();
   }
 
-  void _selectSection(_SettingsSection s) {
-    setState(() => _selected = s);
-    if (!PlatformService.needsFocusSystem) return;
-    // 等右栏内容重建后再请求焦点
+  void _selectSection(_SettingsSection section) {
+    setState(() => _selected = section);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _rightAnchor.nextFocus();
+      if (section == _SettingsSection.source) {
+        _sourceEntry.requestFocus();
+      } else {
+        _rightAnchor.nextFocus();
+      }
     });
   }
 
-  static const _sections = [
-    _SettingsSection.source,
-    _SettingsSection.player,
-    _SettingsSection.cover,
-    _SettingsSection.favorites,
-    _SettingsSection.history,
-  ];
+  void _returnToNavigation() {
+    final section = _effectiveSelected;
+    if (_compact) {
+      setState(() => _selected = null);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _sidebarNodes[section]!.requestFocus();
+      });
+    } else {
+      _sidebarNodes[section]!.requestFocus();
+    }
+  }
+
+  void _leaveSettings() {
+    _backFocus.requestFocus();
+    // Let PopScope observe the changed focus before a pointer-triggered pop.
+    setState(() => _detailFocused = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.maybePop(context);
+    });
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.browserBack ||
+        key == LogicalKeyboardKey.gameButtonB) {
+      if (_detailFocused || (_compact && _selected != null)) {
+        _returnToNavigation();
+      } else {
+        Navigator.maybePop(context);
+      }
+      return KeyEventResult.handled;
+    }
+    final index = _SettingsSection.values.indexWhere(
+      (s) => _sidebarNodes[s]!.hasFocus,
+    );
+    if (index < 0) return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _selectSection(_SettingsSection.values[index]);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      _sidebarNodes[_SettingsSection.values[(index + 1).clamp(0, 5)]]!
+          .requestFocus();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      if (index == 0) {
+        _backFocus.requestFocus();
+      } else {
+        _sidebarNodes[_SettingsSection.values[index - 1]]!.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isCompact = MediaQuery.sizeOf(context).width < 600;
-
-    if (isCompact) {
-      return _buildCompact();
-    }
-    return _buildWide();
+    return PopScope(
+      canPop: _compact ? _selected == null : !_detailFocused,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _returnToNavigation();
+      },
+      child: Focus(
+        canRequestFocus: false,
+        onKeyEvent: _onKey,
+        child: _compact ? _buildCompact() : _buildWide(),
+      ),
+    );
   }
 
-  Widget _buildCompact() {
-    // 手机端：未选中时显示列表；已选中时显示详情面板（带返回）
-    if (_selected == null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('设置')),
-        body: ListView(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          children: [
-            for (final s in _sections)
-              _SidebarItem(
-                icon: s.icon,
-                label: s.label,
-                isSelected: false,
-                onTap: () => _selectSection(s),
-              ),
-            const Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm,
-              ),
-              child: Divider(color: AppColors.divider),
-            ),
-            _SidebarItem(
-              icon: _SettingsSection.about.icon,
-              label: _SettingsSection.about.label,
-              isSelected: false,
-              onTap: () => _selectSection(_SettingsSection.about),
-            ),
-          ],
-        ),
+  Widget _sidebarItem(_SettingsSection section, {bool compact = false}) =>
+      _SidebarItem(
+        icon: section.icon,
+        label: section.label,
+        isSelected: !compact && _effectiveSelected == section,
+        focusNode: _sidebarNodes[section],
+        autofocus:
+            PlatformService.needsFocusSystem && _effectiveSelected == section,
+        onTap: () => _selectSection(section),
       );
-    }
 
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
-        setState(() => _selected = null);
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(_selected!.label),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => setState(() => _selected = null),
-          ),
+  Widget _buildCompact() {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_selected?.label ?? '设置'),
+        leading: IconButton(
+          focusNode: _backFocus,
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: '返回',
+          onPressed: _selected == null
+              ? () => Navigator.maybePop(context)
+              : _returnToNavigation,
         ),
-        body: _buildDetailPanel(),
+      ),
+      body: SafeArea(
+        child: _selected == null
+            ? ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  for (final section in _SettingsSection.values)
+                    _sidebarItem(section, compact: true),
+                ],
+              )
+            : _content(),
       ),
     );
   }
 
   Widget _buildWide() {
-    // TV / 桌面键盘模式下进页面把默认焦点放在当前选中的侧栏项上，
-    // 不然用户按方向键不知道从哪儿开始
-    final autofocusSidebar = PlatformService.needsFocusSystem;
+    final width = MediaQuery.sizeOf(context).width;
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: Row(
-        children: [
-          SizedBox(
-            width: AppSpacing.settingsSidebarWidth,
-            child: Container(
-              color: AppColors.cardBackground,
-              child: FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: ListView(
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.all(PlatformService.isTv ? 24 : 16),
+          child: Row(
+            children: [
+              Container(
+                width: width >= 1200 ? 256 : 224,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF141416),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final s in _sections)
-                      _SidebarItem(
-                        icon: s.icon,
-                        label: s.label,
-                        isSelected: _effectiveSelected == s,
-                        autofocus: autofocusSidebar && _effectiveSelected == s,
-                        onTap: () => _selectSection(s),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 16, 12, 24),
+                      child: _SidebarItem(
+                        icon: Icons.arrow_back_rounded,
+                        label: '设置',
+                        isSelected: false,
+                        focusNode: _backFocus,
+                        onTap: _leaveSettings,
                       ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.sm,
-                      ),
-                      child: Divider(color: AppColors.divider),
                     ),
-                    _SidebarItem(
-                      icon: _SettingsSection.about.icon,
-                      label: _SettingsSection.about.label,
-                      isSelected: _effectiveSelected == _SettingsSection.about,
-                      autofocus:
-                          autofocusSidebar &&
-                          _effectiveSelected == _SettingsSection.about,
-                      onTap: () => _selectSection(_SettingsSection.about),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Column(
+                          children: [
+                            for (final section in _SettingsSection.values) ...[
+                              if (section == _SettingsSection.about)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                  child: Divider(color: AppColors.divider),
+                                ),
+                              _sidebarItem(section),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(28),
+                      child: Text(
+                        'STREAMBOX',
+                        style: AppTypography.caption.copyWith(
+                          letterSpacing: 3,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
-            ),
+              Expanded(child: _content()),
+            ],
           ),
-          const VerticalDivider(width: 1, color: AppColors.divider),
-          Expanded(
-            child: FocusTraversalGroup(
-              policy: ReadingOrderTraversalPolicy(),
-              child: Focus(
-                focusNode: _rightAnchor,
-                skipTraversal: true,
-                canRequestFocus: false,
-                child: _buildDetailPanel(),
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildDetailPanel() {
-    switch (_effectiveSelected) {
-      case _SettingsSection.source:
-        return const _SourcePanel();
-      case _SettingsSection.player:
-        return const _PlayerSettingsPanel();
-      case _SettingsSection.cover:
-        return const _CoverSettingsPanel();
-      case _SettingsSection.favorites:
-        return const FavoritesScreen(embedded: true);
-      case _SettingsSection.history:
-        return const HistoryScreen(embedded: true);
-      case _SettingsSection.about:
-        return const _AboutPanel();
-    }
-  }
+  Widget _content() => FocusTraversalGroup(
+    policy: ReadingOrderTraversalPolicy(),
+    child: Focus(
+      focusNode: _rightAnchor,
+      onFocusChange: (focused) {
+        if (mounted && focused != _detailFocused) {
+          setState(() => _detailFocused = focused);
+        }
+      },
+      child: switch (_effectiveSelected) {
+        _SettingsSection.source => SourceManagePage(
+          embedded: true,
+          entryFocusNode: _sourceEntry,
+          onBackToNavigation: _returnToNavigation,
+        ),
+        _SettingsSection.player => const _PlayerSettingsPanel(),
+        _SettingsSection.cover => const _CoverSettingsPanel(),
+        _SettingsSection.favorites => const FavoritesScreen(embedded: true),
+        _SettingsSection.history => const HistoryScreen(embedded: true),
+        _SettingsSection.about => const _AboutPanel(),
+      },
+    ),
+  );
 }
-
-/// 左侧栏项目

@@ -528,6 +528,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                     spacing: AppSpacing.sm,
                     runSpacing: AppSpacing.xs,
                     children: [
+                      _MetaChip('片源：${widget.site.name}'),
                       if (vod.vodYear?.isNotEmpty == true)
                         _MetaChip(vod.vodYear!),
                       if (vod.vodArea?.isNotEmpty == true)

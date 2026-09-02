@@ -1,10 +1,11 @@
 part of 'settings_screen.dart';
 
-class _SidebarItem extends StatefulWidget {
+class _SidebarItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
   final bool autofocus;
 
   const _SidebarItem({
@@ -12,75 +13,71 @@ class _SidebarItem extends StatefulWidget {
     required this.label,
     required this.isSelected,
     required this.onTap,
+    this.focusNode,
     this.autofocus = false,
   });
 
   @override
-  State<_SidebarItem> createState() => _SidebarItemState();
-}
-
-class _SidebarItemState extends State<_SidebarItem> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    final highlighted = widget.isSelected || _focused;
-    return Focus(
-      autofocus: widget.autofocus,
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Material(
-        color: _focused
-            ? AppColors.netflixRed.withAlpha(40)
-            : (widget.isSelected ? AppColors.surface : Colors.transparent),
-        child: InkWell(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.md,
-            ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Semantics(
+        button: true,
+        selected: isSelected,
+        child: TvFocusable(
+          focusNode: focusNode,
+          autofocus: autofocus,
+          onActivate: onTap,
+          builder: (context, focused) => AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            constraints: const BoxConstraints(minHeight: 60),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: widget.isSelected || _focused
-                      ? AppColors.netflixRed
-                      : Colors.transparent,
-                  width: 3,
-                ),
+              color: focused
+                  ? const Color(0xFF333338)
+                  : isSelected
+                  ? const Color(0xFF341A20)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: focused ? Colors.white : Colors.transparent,
+                width: 2,
               ),
             ),
             child: Row(
               children: [
                 Icon(
-                  widget.icon,
-                  color: highlighted
-                      ? AppColors.primaryText
+                  icon,
+                  size: 23,
+                  color: isSelected
+                      ? const Color(0xFFFF5360)
+                      : focused
+                      ? Colors.white
                       : AppColors.secondaryText,
-                  size: 22,
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Text(
-                  widget.label,
-                  style: AppTypography.body.copyWith(
-                    color: highlighted
-                        ? AppColors.primaryText
-                        : AppColors.secondaryText,
-                    fontWeight: highlighted
-                        ? FontWeight.w600
-                        : FontWeight.normal,
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: AppTypography.body.copyWith(
+                      color: focused || isSelected
+                          ? Colors.white
+                          : AppColors.secondaryText,
+                      fontWeight: focused || isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
                   ),
                 ),
+                if (isSelected)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 6),
+                    child: Icon(
+                      Icons.circle,
+                      size: 6,
+                      color: Color(0xFFFF5360),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -90,17 +87,6 @@ class _SidebarItemState extends State<_SidebarItem> {
   }
 }
 
-/// 配置源面板（复用 SourceManagePage 的内容，去掉 Scaffold）
-class _SourcePanel extends StatelessWidget {
-  const _SourcePanel();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SourceManagePage(embedded: true);
-  }
-}
-
-/// 播放器设置面板
 class _PlayerSettingsPanel extends ConsumerStatefulWidget {
   const _PlayerSettingsPanel();
 

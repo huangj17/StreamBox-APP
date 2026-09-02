@@ -1,4 +1,6 @@
-/// 片源站点，来自 TVBox 配置 JSON 的 sites 数组
+import '../../core/network/url_policy.dart';
+
+/// 片源站点，来自 TVBox 配置或 CMS 源列表。
 enum SiteSourceKind { cms, jar, manual, unknown }
 
 enum GatewaySourceStatus { ready, degraded, failed, unknown }
@@ -36,7 +38,7 @@ class Site {
     },
     api: json['api']?.toString() ?? '',
     searchable: _boolLike(json['searchable'], defaultValue: true),
-    isEnabled: true,
+    isEnabled: _boolLike(json['isEnabled'], defaultValue: true),
     sourceKind: _sourceKindFromTvBox(json),
   );
 
@@ -101,6 +103,68 @@ class Site {
   String? get bridgeUrl => gatewayUrl;
 
   bool get isBridge => isGateway;
+
+  /// 同一接口的尾斜杠差异不应产生重复站点；保留查询参数的意义。
+  String get identity => canonicalApi(api);
+
+  static String canonicalApi(String api) {
+    final uri = Uri.tryParse(api.trim());
+    if (uri == null) return api.trim();
+    return uri
+        .replace(path: uri.path.replaceFirst(RegExp(r'/+$'), ''))
+        .toString();
+  }
+
+  bool get isSupported =>
+      isGateway ||
+      (type != 4 &&
+          UrlPolicy.isSafeCmsApi(api) &&
+          !Uri.parse(api).path.toLowerCase().endsWith('.js'));
+
+  Site copyWith({String? key, String? name, bool? isEnabled}) => Site(
+    key: key ?? this.key,
+    name: name ?? this.name,
+    type: type,
+    api: api,
+    searchable: searchable,
+    isEnabled: isEnabled ?? this.isEnabled,
+    sourceKind: sourceKind,
+    gatewayUrl: gatewayUrl,
+    gatewayStatus: gatewayStatus,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'name': name,
+    'type': type,
+    'api': api,
+    'searchable': searchable,
+    'isEnabled': isEnabled,
+    'gatewayUrl': gatewayUrl,
+    'sourceKind': sourceKind.name,
+    'gatewayStatus': gatewayStatus.name,
+  };
+
+  factory Site.fromCache(Map<String, dynamic> json) {
+    final site = Site.fromJson(json);
+    return Site(
+      key: site.key,
+      name: site.name,
+      type: site.type,
+      api: site.api,
+      searchable: site.searchable,
+      isEnabled: site.isEnabled,
+      gatewayUrl: json['gatewayUrl'] as String?,
+      sourceKind: SiteSourceKind.values.firstWhere(
+        (v) => v.name == json['sourceKind'],
+        orElse: () => site.sourceKind,
+      ),
+      gatewayStatus: GatewaySourceStatus.values.firstWhere(
+        (v) => v.name == json['gatewayStatus'],
+        orElse: () => GatewaySourceStatus.unknown,
+      ),
+    );
+  }
 
   static SiteSourceKind _sourceKindFromTvBox(Map<String, dynamic> json) {
     final type = switch (json['type']) {

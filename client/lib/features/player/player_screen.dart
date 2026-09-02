@@ -200,7 +200,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _historyStorage = ref.read(historyStorageProvider);
     _playerSettings = ref.read(playerSettingsStorageProvider);
 
-    _engine = createVideoEngine(hardwareDecode: _playerSettings.hardwareDecode);
+    _engine = ref.read(videoEngineFactoryProvider)(
+      hardwareDecode: _playerSettings.hardwareDecode,
+    );
 
     // 应用默认倍速
     _playbackSpeed = _playerSettings.defaultSpeed;
@@ -1370,6 +1372,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               onTap: _toggleControls,
               onSecondaryTapUp: _isDesktopPlatform ? _showContextMenu : null,
               child: Stack(
+                // 加载层移除后只剩 SizedBox.shrink；必须固定为可用区域，
+                // 否则 Stack 会缩成 0×0，连同视频与控制栏一起消失。
+                fit: StackFit.expand,
                 children: [
                   // 全屏视频（禁用内置控件，使用自定义控制栏）
                   Positioned.fill(child: _engine.buildVideoView()),
@@ -1382,7 +1387,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         return _LoadingOverlay(
                           title: widget.videoTitle,
                           episodeName: _current.name,
-                          sourceName: _sourceName,
+                          sourceName: '${widget.site.name} · $_sourceName',
                           bufferingSeconds: loading.waitingSeconds,
                           speedBps: loading.appRxBytesPerSecond,
                         );
@@ -1522,7 +1527,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             children: [
               Expanded(
                 child: Text(
-                  '${widget.videoTitle}  ${_current.name}',
+                  '${widget.videoTitle}  ${_current.name} · ${widget.site.name}',
                   style: AppTypography.caption,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1699,7 +1704,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      '${_current.name} · $_sourceName${_currentQuality.isAuto ? '' : ' · ${_qualityLabel(_currentQuality)}'}',
+                      '${_current.name} · ${widget.site.name} · $_sourceName${_currentQuality.isAuto ? '' : ' · ${_qualityLabel(_currentQuality)}'}',
                       style: AppTypography.body.copyWith(
                         color: Colors.white60,
                         fontSize: 16,

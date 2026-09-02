@@ -16,6 +16,7 @@ import '../../widgets/skeleton_card.dart';
 import '../../widgets/tv_focus.dart';
 import '../../core/platform/platform_service.dart';
 import 'providers/categories_provider.dart';
+import '../source/providers/source_library_provider.dart';
 import '../source/providers/source_provider.dart';
 import '../detail/providers/detail_provider.dart';
 import 'widgets/hero_banner.dart';
@@ -68,53 +69,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   /// 从 Hive 恢复上次的配置源和 sites 状态
-  /// 首次启动时自动写入默认片源
+  /// 先完成旧片源清理，再恢复保留的片源。
   Future<void> _restoreFromStorage() async {
     if (!mounted) return;
-    final storage = ref.read(sourceStorageProvider);
-
-    // 首次启动：写入默认片源并选中第一个
-    await storage.initDefaultsIfEmpty();
-
-    final savedUrls = storage.getAll();
-    final selectedUrl = storage.getSelected();
-
-    if (savedUrls.isNotEmpty) {
-      ref.read(savedSourceUrlsProvider.notifier).state = savedUrls;
-    }
-    if (selectedUrl != null) {
-      ref.read(selectedSourceUrlProvider.notifier).state = selectedUrl;
-      try {
-        var config = await ref.read(sourceConfigProvider.future);
-        if (config == null) {
-          // 多仓在选择具体仓库前没有最终配置。
-          final warehouses = await ref.read(warehouseListProvider.future);
-          final lastWh = storage.getSelectedWarehouse(selectedUrl);
-          if (lastWh != null && warehouses.any((w) => w.url == lastWh)) {
-            ref.read(selectedWarehouseUrlProvider.notifier).state = lastWh;
-            config = await ref.read(sourceConfigProvider.future);
-          }
-        }
-        if (mounted && config != null) {
-          syncSitesToHome(ref);
-          // Bridge 源：恢复上次选中的插件（全部 sites → 单个 plugin site）
-          if (selectedUrl.contains(':9978')) {
-            final pluginKey = storage.getSelectedBridgePlugin(selectedUrl);
-            if (pluginKey != null) {
-              final allSites = ref.read(sitesProvider);
-              final matched = allSites
-                  .where((s) => s.key == pluginKey)
-                  .toList();
-              if (matched.isNotEmpty) {
-                ref.read(sitesProvider.notifier).state = matched;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        debugPrint('恢复配置源失败: $error');
-      }
-    }
+    await ref.read(sourceLibraryProvider.notifier).restore();
 
     if (mounted) setState(() => _restoring = false);
   }
@@ -207,7 +165,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final sites = ref.watch(sitesProvider);
+    final sites = ref.watch(homeSitesProvider);
     final categories = ref.watch(categoriesProvider);
     final bannerItems = ref.watch(bannerItemsProvider);
     final watchHistory = ref.watch(watchHistoryProvider);
@@ -217,7 +175,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final mainContent = _restoring
         ? _buildLoadingState()
         : sites.isEmpty
-        ? _buildSourceInput()
+        ? (ref.watch(sitesProvider).isEmpty
+              ? _buildSourceInput()
+              : _buildErrorState('当前启用片源暂不可用，请重新检测或切换片源'))
         : _buildMainContent(categories, bannerItems, watchHistory);
 
     return HomeFocusAnchors(
@@ -319,10 +279,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               size: 56,
             ),
             const SizedBox(height: AppSpacing.md),
-            Text('还没有配置片源', style: AppTypography.body),
+            Text('还没有启用的片源', style: AppTypography.body),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '前往设置 → 配置源管理添加源',
+              '前往设置 → 配置源管理添加或启用片源',
               style: AppTypography.caption.copyWith(color: AppColors.hintText),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -461,7 +421,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 primary: true,
                 autofocus: true,
                 focusNode: _errorRetryFocus,
-                onActivate: () => ref.invalidate(categoriesProvider),
+                onActivate: () {
+                  ref.read(sourceHealthProvider.notifier).refreshAll();
+                  ref.invalidate(categoriesProvider);
+                },
                 // 最左按钮：← 显式回 SideNav 首项（mobile 无 SideNav 不传）
                 onLeftEscape: PlatformService.needsFocusSystem
                     ? () => _sideNavFirstFocus.requestFocus()

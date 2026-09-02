@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/dio_client.dart';
@@ -14,6 +15,9 @@ import '../../../data/local/favorite_storage.dart';
 import '../../../data/local/player_settings_storage.dart';
 import '../../../data/local/search_history_storage.dart';
 import '../../../data/models/favorite_item.dart';
+import '../../../data/models/source_health.dart';
+import '../../source/providers/source_library_provider.dart';
+import '../../source/providers/source_provider.dart';
 
 // ── 基础设施 Provider ──
 
@@ -31,13 +35,64 @@ final homeRepositoryProvider = Provider(
 // ── 配置源 Provider（临时实现，后续由 source 模块接管）──
 
 /// 当前已启用的 Site 列表
-final sitesProvider = StateProvider<List<Site>>((ref) => []);
+final sitesProvider = Provider<List<Site>>((ref) {
+  // 配置加载状态、首页选择变化不会使全部影片缓存失效。
+  ref.watch(
+    sourceLibraryProvider.select(
+      (library) =>
+          jsonEncode(library.activeSites.map((s) => s.toJson()).toList()),
+    ),
+  );
+  return ref.read(sourceLibraryProvider).activeSites;
+});
+
+/// 导航保留所有启用站点，搜索暂时跳过已明确检测失败的站点。
+final searchSitesProvider = Provider<List<Site>>((ref) {
+  final health = ref.watch(sourceHealthProvider);
+  return ref
+      .watch(sitesProvider)
+      .where(
+        (s) =>
+            s.searchable &&
+            health[s.api]?.status != SourceHealthStatus.unavailable,
+      )
+      .toList();
+});
+
+/// 首页只请求一个站点；当前源异常时优先使用检测通过的备用源。
+final _homeSelectionProvider =
+    Provider<({String key, String api, String name})?>((ref) {
+      final sites = ref.watch(sitesProvider);
+      final health = ref.watch(sourceHealthProvider);
+      final preferred = ref.watch(
+        sourceLibraryProvider.select((s) => s.homeIdentity),
+      );
+      final eligible = sites
+          .where((s) => health[s.api]?.status != SourceHealthStatus.unavailable)
+          .toList();
+      if (eligible.isEmpty) return null;
+      final site =
+          eligible.where((s) => s.identity == preferred).firstOrNull ??
+          eligible
+              .where(
+                (s) => health[s.api]?.status == SourceHealthStatus.available,
+              )
+              .firstOrNull ??
+          eligible.first;
+      return (key: site.key, api: site.api, name: site.name);
+    });
+
+final homeSitesProvider = Provider<List<Site>>((ref) {
+  final selection = ref.watch(_homeSelectionProvider);
+  if (selection == null) return [];
+  return [ref.read(sitesProvider).firstWhere((s) => s.key == selection.key)];
+});
 
 // ── 数据 Provider ──
 
 /// 分类列表（固定行 + 动态行合并，按用户观看历史排序）
 final categoriesProvider = FutureProvider<List<Category>>((ref) async {
-  final sites = ref.watch(sitesProvider);
+  final sites = ref.watch(homeSitesProvider);
   if (sites.isEmpty) return [];
   final repo = ref.read(homeRepositoryProvider);
   final historyStorage = ref.read(historyStorageProvider);

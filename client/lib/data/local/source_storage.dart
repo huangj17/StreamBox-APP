@@ -1,43 +1,24 @@
+import 'dart:convert';
 import 'package:hive/hive.dart';
+import '../models/site.dart';
+import '../models/source_config.dart';
 
 /// 配置源 URL 持久化存储
 class SourceStorage {
   static const _boxName = 'source_urls';
 
-  /// 内置片源（预置源，不可删除）
+  /// 保留的内置 CMS 片源。
   static const builtInUrls = [
-    // 本机 JAR Bridge。远程 Bridge 必须由用户显式添加并使用 HTTPS。
-    'http://127.0.0.1:9978',
-    // 暴风：默认选中的 CMS 源（金鹰 jyzyapi 已挂，2026-05-09 移除）
     'https://bfzyapi.com/api.php/provide/vod/',
     'https://www.hongniuzy2.com/api.php/provide/vod/',
-    'https://www.tyyszy.com/api.php/provide/vod/',
-    'https://collect.wolongzyw.com/api.php/provide/vod/',
-    'https://api.apibdzy.com/api.php/provide/vod/',
   ];
 
-  /// 已下架/失效的旧默认源 — 启动时从用户 Hive 里清理掉
-  static const _deprecatedUrls = [
-    'https://jyzyapi.com/api.php/provide/vod/', // 金鹰：服务挂了
-    'http://1.14.171.39:9978', // 已停用的公网明文 Gateway
-  ];
-
-  /// 预置第三方片源
-  static const thirdPartyUrls = [
-    'https://www.iyouhun.com/tv/fxz',
-    'https://www.iyouhun.com/tv/dc',
-    'https://www.iyouhun.com/tv/fty',
-  ];
-
-  /// 所有默认片源（首次启动时自动写入）
-  static const defaultUrls = [...builtInUrls, ...thirdPartyUrls];
-
-  /// 首次启动默认选中的源：跳过 Bridge（可能未启动）和第三方，挑第一个 CMS
   static const defaultSelectedUrl = 'https://bfzyapi.com/api.php/provide/vod/';
+  static const _sourceCleanupKey = '_source_cleanup_version';
+  static const _sourceCleanupVersion = '1';
 
-  /// 已知片源的友好名称和描述
+  /// 已知片源的友好名称和描述。
   static const sourceInfo = <String, ({String name, String desc})>{
-    'http://127.0.0.1:9978': (name: 'JAR Bridge', desc: '本机服务 · JAR 插件源'),
     'https://bfzyapi.com/api.php/provide/vod/': (
       name: '暴风资源',
       desc: 'HD · 13万+ · 多CDN',
@@ -46,26 +27,18 @@ class SourceStorage {
       name: '红牛资源',
       desc: '双线路 · 10万+',
     ),
-    'https://www.tyyszy.com/api.php/provide/vod/': (
-      name: '天一资源',
-      desc: '多画质 · 75分类',
-    ),
-    'https://collect.wolongzyw.com/api.php/provide/vod/': (
-      name: '卧龙资源',
-      desc: '8.5万+ · 54分类',
-    ),
-    'https://api.apibdzy.com/api.php/provide/vod/': (
-      name: '百度资源',
-      desc: '老牌稳定 · 50分类',
-    ),
-    // 多仓 / 第三方单仓
-    'https://www.iyouhun.com/tv/dc': (name: '游魂多仓', desc: '多仓 · 27个子源'),
-    'https://www.iyouhun.com/tv/fty': (name: '饭太硬', desc: '单仓 · 综合源'),
-    'https://www.iyouhun.com/tv/fxz': (name: '分享者', desc: '单仓 · 画质高 · 速度慢'),
   };
 
   /// 根据 URL 获取友好名称，未知源从域名提取
   static String nameOf(String url) {
+    final parsed = Uri.tryParse(url);
+    if (parsed?.path.toLowerCase().contains('/ouonnkitv/') == true) {
+      final file = parsed!.pathSegments.last.replaceFirst(
+        RegExp(r'\.json$'),
+        '',
+      );
+      return 'OuonnkiTV ${file == 'lite' ? 'Lite' : file}';
+    }
     final info = sourceInfo[url];
     if (info != null) return info.name;
     final uri = Uri.tryParse(url);
@@ -92,17 +65,23 @@ class SourceStorage {
 
   /// 添加配置源 URL
   Future<void> add(String url) async {
-    if (_box.values.contains(url)) return;
+    if (getAll().contains(url)) return;
     await _box.add(url);
   }
 
   /// 删除配置源 URL
   Future<void> remove(String url) async {
-    final key = _box.keys.firstWhere(
-      (k) => _box.get(k) == url,
-      orElse: () => null,
-    );
-    if (key != null) await _box.delete(key);
+    final keys = _box.keys
+        .whereType<int>()
+        .where((key) => _box.get(key) == url)
+        .toList();
+    await _box.deleteAll([
+      ...keys,
+      '_wh:$url',
+      '_bp:$url',
+      '_config:$url',
+      if (getSelected() == url) '_selected',
+    ]);
   }
 
   /// 获取当前选中的配置源 URL
@@ -137,47 +116,79 @@ class SourceStorage {
     }
   }
 
-  /// 初始化默认片源
-  /// 首次启动写入全部默认源并选中第一个；
-  /// 非首次启动补充新增的默认源（不影响已有数据和选中状态）
-  Future<void> initDefaultsIfEmpty() async {
-    await _purgeDeprecated();
-
-    final existing = getAll();
-    if (existing.isEmpty) {
-      // 首次启动
-      for (final url in defaultUrls) {
-        await add(url);
-      }
-      await setSelected(defaultSelectedUrl);
-    } else {
-      // 补充新增的默认源
-      for (final url in defaultUrls) {
-        if (!existing.contains(url)) {
-          await add(url);
-        }
-      }
+  SourceConfig? getCachedConfig(String url) {
+    final raw = _box.get('_config:$url');
+    if (raw == null) return null;
+    try {
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final config = SourceConfig.fromJson(json);
+      return SourceConfig(
+        sites: (json['sites'] as List)
+            .map((s) => Site.fromCache(Map<String, dynamic>.from(s as Map)))
+            .toList(),
+        spider: config.spider,
+        lives: config.lives,
+        parses: config.parses,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
-  /// 清理 [_deprecatedUrls] 列出的失效源，并纠正可能选中的失效源。
-  /// 同时清理引用失效源的 `_wh:` / `_bp:` 子键，避免 Hive 残留垃圾。
-  Future<void> _purgeDeprecated() async {
-    for (final url in _deprecatedUrls) {
-      await remove(url);
-      await _box.delete('_wh:$url');
-      await _box.delete('_bp:$url');
+  Future<void> cacheConfig(String url, SourceConfig config) => _box.put(
+    '_config:$url',
+    jsonEncode({
+      'sites': config.sites.map((s) => s.toJson()).toList(),
+      'spider': config.spider,
+      'lives': config.lives
+          .map(
+            (s) => {'name': s.name, 'url': s.url, 'playerType': s.playerType},
+          )
+          .toList(),
+      'parses': config.parses
+          .map((s) => {'name': s.name, 'url': s.url})
+          .toList(),
+    }),
+  );
+
+  Future<void> clearCachedConfig(String url) => _box.delete('_config:$url');
+
+  Map<String, bool> getSiteEnabled() {
+    final raw = _box.get('_site_enabled');
+    if (raw == null) return {};
+    return Map<String, bool>.from(jsonDecode(raw) as Map);
+  }
+
+  Future<void> setSiteEnabled(Map<String, bool> values) =>
+      _box.put('_site_enabled', jsonEncode(values));
+
+  String? getHomeSite() => _box.get('_home_site');
+  Future<void> setHomeSite(String identity) => _box.put('_home_site', identity);
+
+  /// 首次升级清理旧片源，之后只补充保留的内置 CMS 源。
+  Future<void> initDefaultsIfEmpty() async {
+    await _clearLegacySources();
+    for (final url in builtInUrls) {
+      await add(url);
     }
     final selected = getSelected();
-    if (selected != null && _deprecatedUrls.contains(selected)) {
-      // 选中的源已失效 → 切到默认（如已存在则用默认；否则用首个内置 CMS）
-      final fallback = getAll().contains(defaultSelectedUrl)
-          ? defaultSelectedUrl
-          : (getAll().firstWhere(
-              (u) => isBuiltIn(u) && !u.contains(':9978'),
-              orElse: () => defaultSelectedUrl,
-            ));
-      await setSelected(fallback);
+    if (selected == null || !getAll().contains(selected)) {
+      await setSelected(defaultSelectedUrl);
     }
+  }
+
+  /// 清理旧第三方配置（含失败/超时记录）、下架的 CMS 与 JAR 源。
+  /// 使用一次性迁移，避免以后用户手动添加的配置在重启时被误删。
+  Future<void> _clearLegacySources() async {
+    if (_box.get(_sourceCleanupKey) == _sourceCleanupVersion) return;
+
+    final keysToDelete = _box.keys.where((key) {
+      if (key is int) return !isBuiltIn(_box.get(key)!);
+      if (key == '_selected') return !isBuiltIn(_box.get(key)!);
+      return key is String &&
+          (key.startsWith('_wh:') || key.startsWith('_bp:'));
+    }).toList();
+    await _box.deleteAll(keysToDelete);
+    await _box.put(_sourceCleanupKey, _sourceCleanupVersion);
   }
 }
