@@ -1,8 +1,31 @@
 import 'dart:io';
+import '../config/official_sources.dart';
 
 /// Untrusted configuration and CMS responses must not select arbitrary local
 /// files/protocol handlers or literal private-network endpoints.
 class UrlPolicy {
+  /// A narrowly scoped exception for the configured official endpoint. Redirects
+  /// may upgrade the same host/path to HTTPS, never select another HTTP target.
+  static Uri requireOfficialConfigUrl(String raw) {
+    final uri = _parse(raw);
+    final configured = _parse(OfficialSources.url);
+    final exact = uri == configured;
+    final httpsUpgrade =
+        configured.scheme == 'http' &&
+        uri.scheme == 'https' &&
+        uri.port == 443 &&
+        uri.host == configured.host &&
+        uri.path == configured.path &&
+        uri.query == configured.query;
+    if ((!exact && !httpsUpgrade) ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        _isPrivateLiteral(uri.host) ||
+        _isLoopbackHost(uri.host)) {
+      throw const FormatException('官方配置只允许访问指定服务器的配置文件');
+    }
+    return uri;
+  }
+
   static Uri requireConfigUrl(String raw) {
     final uri = _parse(raw);
     if (uri.scheme == 'https') return uri;

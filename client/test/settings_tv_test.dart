@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -59,8 +60,8 @@ void main() {
       SourceParser(dio),
       SourceLibrary(
         groups: {
-          SourceStorage.builtInUrls.first: SourceGroup(
-            url: SourceStorage.builtInUrls.first,
+          SourceStorage.officialUrl: SourceGroup(
+            url: SourceStorage.officialUrl,
             config: SourceConfig(sites: _sites.take(2).toList()),
           ),
           _collection: SourceGroup(
@@ -135,6 +136,16 @@ void main() {
 
   String? focus() => FocusManager.instance.primaryFocus?.debugLabel;
 
+  void expectFocusedRowVisible() {
+    final context = FocusManager.instance.primaryFocus!.context!;
+    final row = context.findRenderObject()! as RenderBox;
+    final viewport =
+        Scrollable.of(context).context.findRenderObject()! as RenderBox;
+    final top = row.localToGlobal(Offset.zero, ancestor: viewport).dy;
+    expect(top, greaterThanOrEqualTo(0));
+    expect(top + row.size.height, lessThanOrEqualTo(viewport.size.height));
+  }
+
   testWidgets('desktop: one click on back exits even when content had focus', (
     tester,
   ) async {
@@ -176,6 +187,151 @@ void main() {
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.escape);
       expect(focus(), 'settings-nav-source');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'TV: official update is D-pad reachable and keeps focus through loading and failure',
+    (tester) async {
+      library.pendingOfficialUpdate = Completer<void>();
+      library.refreshError = '更新失败，保留上次成功配置';
+      await pumpPage(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focus(), 'source-row-red');
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(focus(), 'source-update');
+      await key(tester, LogicalKeyboardKey.select);
+      expect(library.officialUpdateRequests, 1);
+      expect(find.text('更新中…'), findsOneWidget);
+      expect(focus(), 'source-update');
+      await key(tester, LogicalKeyboardKey.select);
+      expect(library.officialUpdateRequests, 1);
+      library.pendingOfficialUpdate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('更新失败，保留上次成功配置'), findsOneWidget);
+      expect(find.text('立即更新'), findsOneWidget);
+      expect(focus(), 'source-update');
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(focus(), 'settings-nav-source');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'TV: remote insertions and reordering keep the focused source visible',
+    (tester) async {
+      await pumpPage(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focus(), 'source-row-storm');
+      expectFocusedRowVisible();
+
+      void replaceSites(List<Site> sites) {
+        library.replace(
+          library.state.copyWith(
+            groups: {
+              ...library.state.groups,
+              SourceStorage.officialUrl: SourceGroup(
+                url: SourceStorage.officialUrl,
+                config: SourceConfig(sites: sites),
+                version: 'v2',
+              ),
+            },
+          ),
+        );
+      }
+
+      replaceSites([..._sites.skip(2).take(8), ..._sites.take(2)]);
+      await tester.pumpAndSettle();
+      expect(focus(), 'source-row-storm');
+      expectFocusedRowVisible();
+
+      final position = Scrollable.of(
+        FocusManager.instance.primaryFocus!.context!,
+      ).position;
+      final offset = position.pixels;
+      health.update({_sites[1].api: SourceHealth.unavailable(message: '超时')});
+      await tester.pumpAndSettle();
+      expect(position.pixels, offset);
+
+      replaceSites([_sites[1], ..._sites.skip(2).take(8), _sites[0]]);
+      await tester.pumpAndSettle();
+      expect(focus(), 'source-row-storm');
+      expectFocusedRowVisible();
+
+      await key(tester, LogicalKeyboardKey.select);
+      final dialogFocus = focus();
+      final dialogOffset = position.pixels;
+      replaceSites([..._sites.skip(2).take(8), ..._sites.take(2)]);
+      await tester.pumpAndSettle();
+      expect(focus(), dialogFocus);
+      expect(position.pixels, dialogOffset);
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(focus(), 'source-row-storm');
+      expectFocusedRowVisible();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'TV: remote removal of focused source moves focus to update; empty catalog stays operable',
+    (tester) async {
+      await pumpPage(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(focus(), 'source-row-red');
+      library.replace(
+        SourceLibrary(
+          groups: {
+            SourceStorage.officialUrl: SourceGroup(
+              url: SourceStorage.officialUrl,
+              config: const SourceConfig(sites: []),
+              version: 'empty-v2',
+              syncedAt: DateTime(2026, 9, 2, 20, 10),
+            ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('配置版本：empty-v2'), findsOneWidget);
+      expect(find.text('这里还没有片源'), findsOneWidget);
+      expect(focus(), 'source-update');
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(focus(), 'settings-nav-source');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'TV: removal while action dialog is open provides return to a surviving control',
+    (tester) async {
+      await pumpPage(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byType(Dialog), findsOneWidget);
+      library.replace(
+        const SourceLibrary(
+          groups: {
+            SourceStorage.officialUrl: SourceGroup(
+              url: SourceStorage.officialUrl,
+              config: SourceConfig(sites: []),
+            ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('片源已移除'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.byType(Dialog), findsNothing);
+      expect(focus(), 'source-update');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -389,6 +545,27 @@ void main() {
 }
 
 class _Library extends SourceLibraryNotifier {
+  Completer<void>? pendingOfficialUpdate;
+  String? refreshError;
+  int officialUpdateRequests = 0;
+
+  @override
+  Future<void> refresh(String url) async {
+    if (url != SourceStorage.officialUrl) return super.refresh(url);
+    officialUpdateRequests++;
+    final previous = state.groups[url]!;
+    state = state.copyWith(
+      groups: {...state.groups, url: previous.withStatus(loading: true)},
+    );
+    await pendingOfficialUpdate?.future;
+    state = state.copyWith(
+      groups: {
+        ...state.groups,
+        url: previous.withStatus(error: refreshError),
+      },
+    );
+  }
+
   void replace(SourceLibrary value) {
     state = value;
   }

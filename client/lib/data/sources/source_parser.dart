@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/config/official_sources.dart';
 import 'package:dio/dio.dart';
 import '../../core/network/bounded_response.dart';
 import '../../core/network/gateway_auth.dart';
@@ -6,6 +7,7 @@ import '../../core/network/url_policy.dart';
 import '../models/source_config.dart';
 import '../models/site.dart';
 import '../models/warehouse.dart';
+import '../models/official_source_catalog.dart';
 
 class ParsedSourceDocument {
   final SourceConfig? config;
@@ -23,6 +25,36 @@ class SourceParser {
   final Dio _dio;
 
   SourceParser(this._dio);
+
+  Future<OfficialSourceCatalog> parseOfficialCatalog() async {
+    final uri = UrlPolicy.requireOfficialConfigUrl(OfficialSources.url);
+    final cancel = CancelToken();
+    var secure = uri.scheme == 'https';
+    try {
+      final text = await getBoundedText(
+        _dio,
+        uri.toString(),
+        headers: const {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'},
+        receiveTimeout: const Duration(seconds: 10),
+        cancelToken: cancel,
+        redirectValidator: (next) {
+          if (secure && next.scheme != 'https') {
+            throw const FormatException('官方配置不允许从 HTTPS 降级到 HTTP');
+          }
+          UrlPolicy.requireOfficialConfigUrl(next.toString());
+          secure = next.scheme == 'https';
+        },
+        maxBytes: 256 * 1024,
+      ).timeout(const Duration(seconds: 20));
+      final json = jsonDecode(text);
+      if (json is! Map<String, dynamic>) {
+        throw const FormatException('官方配置必须是 JSON 对象');
+      }
+      return OfficialSourceCatalog.fromJson(json);
+    } finally {
+      cancel.cancel('Official configuration request completed');
+    }
+  }
 
   /// 从 URL 下载并解析 TVBox 单仓配置
   Future<SourceConfig> parse(

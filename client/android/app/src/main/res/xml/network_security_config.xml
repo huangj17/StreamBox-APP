@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- CMS/Gateway/config 仍由 UrlPolicy 强制 HTTPS；这里只为公共 HTTP 媒体流
-         开放平台传输能力，私网播放地址继续由 UrlPolicy 拒绝。 -->
+    <!-- CMS/Gateway/用户配置仍由 UrlPolicy 强制 HTTPS；公共 HTTP 媒体流和
+         固定官方配置地址可用明文传输，私网播放地址继续由 UrlPolicy 拒绝。 -->
     <base-config cleartextTrafficPermitted="true" />
     <!-- 本地开发 Bridge 例外。 -->
     <domain-config cleartextTrafficPermitted="true">

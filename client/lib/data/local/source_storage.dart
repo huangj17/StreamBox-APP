@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:hive/hive.dart';
+import '../../core/config/official_sources.dart';
+import '../models/official_source_catalog.dart';
 import '../models/site.dart';
 import '../models/source_config.dart';
 
@@ -7,15 +9,16 @@ import '../models/source_config.dart';
 class SourceStorage {
   static const _boxName = 'source_urls';
 
-  /// 保留的内置 CMS 片源。
+  /// 升级迁移前的两个内置 CMS URL；现在只用于识别旧记录与首次离线兜底。
   static const builtInUrls = [
     'https://bfzyapi.com/api.php/provide/vod/',
     'https://www.hongniuzy2.com/api.php/provide/vod/',
   ];
 
-  static const defaultSelectedUrl = 'https://bfzyapi.com/api.php/provide/vod/';
-  static const _sourceCleanupKey = '_source_cleanup_version';
-  static const _sourceCleanupVersion = '1';
+  static const officialUrl = OfficialSources.url;
+  static const defaultSelectedUrl = officialUrl;
+  static const _officialMigrationKey = '_official_sources_migrated_v1';
+  static const _officialSnapshotKey = '_official_sources_snapshot_v1';
 
   /// 已知片源的友好名称和描述。
   static const sourceInfo = <String, ({String name, String desc})>{
@@ -31,6 +34,7 @@ class SourceStorage {
 
   /// 根据 URL 获取友好名称，未知源从域名提取
   static String nameOf(String url) {
+    if (url == officialUrl) return '官方片源';
     final parsed = Uri.tryParse(url);
     if (parsed?.path.toLowerCase().contains('/ouonnkitv/') == true) {
       final file = parsed!.pathSegments.last.replaceFirst(
@@ -49,8 +53,8 @@ class SourceStorage {
   /// 根据 URL 获取描述信息
   static String? descOf(String url) => sourceInfo[url]?.desc;
 
-  /// 判断是否为内置 CMS API 片源
-  static bool isBuiltIn(String url) => builtInUrls.contains(url);
+  /// 判断是否为应用管理的官方订阅分组（不包含用户手动添加的相同 CMS）。
+  static bool isBuiltIn(String url) => url == officialUrl;
 
   late Box<String> _box;
 
@@ -165,30 +169,50 @@ class SourceStorage {
   String? getHomeSite() => _box.get('_home_site');
   Future<void> setHomeSite(String identity) => _box.put('_home_site', identity);
 
-  /// 首次升级清理旧片源，之后只补充保留的内置 CMS 源。
-  Future<void> initDefaultsIfEmpty() async {
-    await _clearLegacySources();
-    for (final url in builtInUrls) {
-      await add(url);
+  OfficialSourceSnapshot? getOfficialSnapshot() {
+    try {
+      final raw = _box.get(_officialSnapshotKey);
+      if (raw == null) return null;
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      return OfficialSourceSnapshot(
+        OfficialSourceCatalog.fromJson(json['catalog'] as Map<String, dynamic>),
+        DateTime.parse(json['syncedAt'] as String),
+      );
+    } catch (_) {
+      return null;
     }
+  }
+
+  /// Document and metadata commit together, only after validation succeeded.
+  Future<void> saveOfficialSnapshot(OfficialSourceSnapshot snapshot) =>
+      _box.put(
+        _officialSnapshotKey,
+        jsonEncode({
+          'catalog': snapshot.catalog.toJson(),
+          'syncedAt': snapshot.syncedAt.toUtc().toIso8601String(),
+        }),
+      );
+
+  /// Migrate only the two formerly built-in URLs. Never run the old broad
+  /// cleanup: custom sources, preferences and warehouse selections belong to users.
+  Future<void> initDefaultsIfEmpty() async {
+    if (_box.get(_officialMigrationKey) != '1') {
+      final selected = getSelected();
+      if (builtInUrls.contains(selected) && getHomeSite() == null) {
+        await setHomeSite(Site.canonicalApi(selected!));
+      }
+      final legacyKeys = _box.keys
+          .whereType<int>()
+          .where((key) => builtInUrls.contains(_box.get(key)))
+          .toList();
+      await _box.deleteAll(legacyKeys);
+      if (builtInUrls.contains(selected)) await setSelected(officialUrl);
+      await _box.put(_officialMigrationKey, '1');
+    }
+    await add(officialUrl);
     final selected = getSelected();
     if (selected == null || !getAll().contains(selected)) {
       await setSelected(defaultSelectedUrl);
     }
-  }
-
-  /// 清理旧第三方配置（含失败/超时记录）、下架的 CMS 与 JAR 源。
-  /// 使用一次性迁移，避免以后用户手动添加的配置在重启时被误删。
-  Future<void> _clearLegacySources() async {
-    if (_box.get(_sourceCleanupKey) == _sourceCleanupVersion) return;
-
-    final keysToDelete = _box.keys.where((key) {
-      if (key is int) return !isBuiltIn(_box.get(key)!);
-      if (key == '_selected') return !isBuiltIn(_box.get(key)!);
-      return key is String &&
-          (key.startsWith('_wh:') || key.startsWith('_bp:'));
-    }).toList();
-    await _box.deleteAll(keysToDelete);
-    await _box.put(_sourceCleanupKey, _sourceCleanupVersion);
   }
 }

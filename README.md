@@ -73,6 +73,12 @@ flutter run -d macos
 
 详细配置（添加 JAR 插件、DEX 转换、API 端点等）见 [jar-bridge/README.md](jar-bridge/README.md)。
 
+### 官方片源远程配置（免重新安装）
+
+安装支持远程配置的客户端后，只需维护服务器上的一个 JSON 文件，即可更新官方片源的地址、顺序和上下架状态。启动时后台同步，前台每 30 分钟检查，也可在「设置 → 配置源管理 → 官方片源」选择「立即更新」；网络失败时继续使用缓存，用户自定义源不被清理。
+
+初始文件：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和 HTTP 安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+
 ## 环境要求
 
 | 子项目     | 依赖                                                      |

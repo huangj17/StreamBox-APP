@@ -18,6 +18,7 @@ import 'data/local/favorite_storage.dart';
 import 'data/local/player_settings_storage.dart';
 import 'data/local/search_history_storage.dart';
 import 'features/source/providers/source_provider.dart';
+import 'features/source/providers/source_library_provider.dart';
 import 'features/home/providers/categories_provider.dart';
 
 void main() async {
@@ -110,10 +111,14 @@ class _StreamBoxAppState extends ConsumerState<StreamBoxApp>
     // 提前实例化健康检测 Provider；片源从 Hive 恢复后会自动
     // 触发首轮后台检测。
     ref.read(sourceHealthProvider.notifier);
+    unawaited(ref.read(sourceLibraryProvider.notifier).restore());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    ref
+        .read(sourceLibraryProvider.notifier)
+        .setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
       unawaited(ref.read(sourceHealthProvider.notifier).refreshStale());
     }

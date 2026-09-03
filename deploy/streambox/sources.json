@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "version": "2026-09-02.1",
+  "sites": [
+    {
+      "key": "baofeng",
+      "name": "暴风资源",
+      "type": 3,
+      "api": "https://bfzyapi.com/api.php/provide/vod/",
+      "searchable": true,
+      "isEnabled": true
+    },
+    {
+      "key": "hongniu",
+      "name": "红牛资源",
+      "type": 3,
+      "api": "https://www.hongniuzy2.com/api.php/provide/vod/",
+      "searchable": true,
+      "isEnabled": true
+    }
+  ]
+}

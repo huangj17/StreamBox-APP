@@ -156,7 +156,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
               child: Row(
                 children: [
                   _SourceButton(
-                    label: '内置片源',
+                    label: '官方片源',
                     icon: Icons.inventory_2_outlined,
                     selected: selected == null,
                     focusNode: entryFocus,

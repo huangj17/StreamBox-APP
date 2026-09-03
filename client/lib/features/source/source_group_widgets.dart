@@ -26,10 +26,12 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
   bool _showProblems = false;
   String? _error;
   final _filterFocus = FocusNode(debugLabel: 'source-problem-filter');
+  final _updateFocus = FocusNode(debugLabel: 'source-update');
 
   @override
   void dispose() {
     _filterFocus.dispose();
+    _updateFocus.dispose();
     super.dispose();
   }
 
@@ -39,7 +41,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       context: context,
       builder: (context) => _SourceDialog(
         title: '移除配置源？',
-        subtitle: '移除「${group.name}」及其片源，共享的内置片源会保留。',
+        subtitle: '移除「${group.name}」及其片源，共享的官方片源会保留。',
         children: [
           _SourceButton(
             label: '保留配置源',
@@ -116,9 +118,14 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                   icon: Icons.refresh_rounded,
                   onActivate: widget.checking ? null : widget.onCheck,
                 ),
-                if (!builtIn) ...[
+                if (group != null)
                   _SourceButton(
-                    label: loading ? '更新中…' : '更新配置',
+                    focusNode: _updateFocus,
+                    label: loading
+                        ? '更新中…'
+                        : builtIn
+                        ? '立即更新'
+                        : '更新配置',
                     icon: Icons.sync_rounded,
                     onActivate: loading
                         ? null
@@ -126,16 +133,35 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                               .read(sourceLibraryProvider.notifier)
                               .refresh(group.url),
                   ),
+                if (!builtIn)
                   _SourceButton(
                     label: '移除',
                     icon: Icons.delete_outline_rounded,
                     onActivate: () => _remove(group),
                   ),
-                ],
               ],
             ),
           ],
         ),
+        if (builtIn && group != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            group.usingFallback
+                ? '本地兜底 · 尚未成功同步'
+                : '配置版本：${group.version ?? '—'}',
+            style: AppTypography.body,
+          ),
+          Text(
+            '上次同步：${_syncTime(group.syncedAt)} · 前台每 30 分钟检查',
+            style: AppTypography.body,
+          ),
+          Text(SourceStorage.officialUrl, style: AppTypography.body),
+          if (Uri.parse(SourceStorage.officialUrl).scheme == 'http')
+            Text(
+              '当前配置使用 HTTP，建议服务器启用 HTTPS',
+              style: AppTypography.body.copyWith(color: AppColors.warning),
+            ),
+        ],
         if (errors.isNotEmpty || _error != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
@@ -163,9 +189,13 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
             site: site,
             health: health[site.api],
             home: home?.identity == site.identity,
+            officiallyDisabled: library.isOfficiallyDisabled(site.identity),
             onBackToNavigation: widget.onBackToNavigation,
+            onUpToActions: site == visible.first
+                ? () => _updateFocus.requestFocus()
+                : null,
             onRestoreFallback: () {
-              if (mounted) _filterFocus.requestFocus();
+              if (mounted) _updateFocus.requestFocus();
             },
           ),
           const SizedBox(height: 10),
@@ -218,13 +248,23 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       ],
     );
   }
+
+  String _syncTime(DateTime? time) {
+    if (time == null) return '尚未同步';
+    final local = time.toLocal();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
 }
 
 class _SiteRow extends StatefulWidget {
   final Site site;
   final SourceHealth? health;
   final bool home;
+  final bool officiallyDisabled;
   final VoidCallback? onBackToNavigation;
+  final VoidCallback? onUpToActions;
   final VoidCallback onRestoreFallback;
 
   const _SiteRow({
@@ -232,8 +272,10 @@ class _SiteRow extends StatefulWidget {
     required this.site,
     required this.health,
     required this.home,
+    this.officiallyDisabled = false,
     required this.onRestoreFallback,
     this.onBackToNavigation,
+    this.onUpToActions,
   });
 
   @override
@@ -242,6 +284,40 @@ class _SiteRow extends StatefulWidget {
 
 class _SiteRowState extends State<_SiteRow> {
   late final _focus = FocusNode(debugLabel: 'source-row-${widget.site.key}');
+
+  @override
+  void didUpdateWidget(covariant _SiteRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focus.hasFocus) return;
+    // A retained keyed row can move without a focus change after an OTA update.
+    // Wait for layout, and only scroll if it actually left the viewport.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focus.hasFocus) return;
+      final scrollable = Scrollable.maybeOf(context);
+      final row = context.findRenderObject();
+      final viewport = scrollable?.context.findRenderObject();
+      if (scrollable == null || row is! RenderBox || viewport is! RenderBox) {
+        return;
+      }
+      final top = row.localToGlobal(Offset.zero, ancestor: viewport).dy;
+      if (top >= 0 && top + row.size.height <= viewport.size.height) return;
+      scrollable.position.ensureVisible(
+        row,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  @override
+  void deactivate() {
+    if (_focus.hasFocus) {
+      final fallback = widget.onRestoreFallback;
+      WidgetsBinding.instance.addPostFrameCallback((_) => fallback());
+    }
+    super.deactivate();
+  }
 
   @override
   void dispose() {
@@ -268,6 +344,12 @@ class _SiteRowState extends State<_SiteRow> {
     return Focus(
       canRequestFocus: false,
       onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowUp &&
+            widget.onUpToActions != null) {
+          widget.onUpToActions!();
+          return KeyEventResult.handled;
+        }
         if (event is KeyDownEvent &&
             event.logicalKey == LogicalKeyboardKey.arrowLeft &&
             widget.onBackToNavigation != null) {
@@ -348,7 +430,9 @@ class _SiteRowState extends State<_SiteRow> {
                                   SourceHealth.unverified(message: '尚未检测'),
                             ),
                           Text(
-                            widget.home
+                            widget.officiallyDisabled
+                                ? '官方已停用'
+                                : widget.home
                                 ? '首页使用中'
                                 : site.isEnabled
                                 ? '已启用'
@@ -431,11 +515,18 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
     final home =
         ref.watch(homeSitesProvider).firstOrNull?.identity == site.identity;
     final controller = ref.read(sourceLibraryProvider.notifier);
+    final officiallyDisabled = ref
+        .watch(sourceLibraryProvider)
+        .isOfficiallyDisabled(site.identity);
     final canUse =
-        site.isSupported && health?.status != SourceHealthStatus.unavailable;
+        site.isSupported &&
+        !officiallyDisabled &&
+        health?.status != SourceHealthStatus.unavailable;
     return _SourceDialog(
       title: site.name,
-      subtitle: !site.isSupported
+      subtitle: officiallyDisabled
+          ? '该片源已由官方停用，后续配置恢复后可继续使用'
+          : !site.isSupported
           ? '该接口格式或协议暂不支持'
           : health?.message ?? '尚未检测，可以先检测片源是否可用',
       children: [
@@ -450,7 +541,9 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
         ),
         const SizedBox(height: 12),
         _SourceButton(
-          label: !site.isSupported
+          label: officiallyDisabled
+              ? '官方已停用'
+              : !site.isSupported
               ? '暂不支持启用'
               : site.isEnabled
               ? '停用此片源'
@@ -458,7 +551,7 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
           icon: site.isEnabled
               ? Icons.toggle_on_outlined
               : Icons.toggle_off_outlined,
-          onActivate: !site.isSupported || _saving
+          onActivate: !site.isSupported || officiallyDisabled || _saving
               ? null
               : () => _save(() => controller.setEnabled(site, !site.isEnabled)),
         ),
