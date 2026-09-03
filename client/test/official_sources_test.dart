@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:streambox/core/config/official_sources.dart';
+import 'package:streambox/core/config/production_gateway.dart';
 import 'package:streambox/core/network/bounded_response.dart';
 import 'package:streambox/core/network/url_policy.dart';
 import 'package:streambox/data/local/source_storage.dart';
@@ -69,11 +70,60 @@ void main() {
     final published = OfficialSourceCatalog.fromJson(
       jsonDecode(File('../deploy/streambox/sources.json').readAsStringSync()),
     );
-    expect(published.config.sites.map((s) => s.api), SourceStorage.builtInUrls);
-    expect(
-      published.config.sites.map((s) => s.key),
-      SourceStorage.builtInUrls.map((url) => url.hashCode.toString()),
-    );
+    for (final url in SourceStorage.builtInUrls) {
+      final site = published.config.sites.singleWhere(
+        (s) => s.identity == url.replaceFirst(RegExp(r'/$'), ''),
+      );
+      expect(site.key, url.hashCode.toString());
+    }
+    final restored = published.config.sites.where((s) => s.isBridge);
+    expect(restored.map((s) => s.key), [
+      'bridge_jianpian',
+      'bridge_ikanbot',
+      'bridge_ysj',
+    ]);
+    expect(restored.every((s) => s.isSupported), isTrue);
+  });
+
+  test('生产片源同属官方列表，保留首页、启停、缓存和历史身份', () async {
+    await start();
+    await library.selectHome(library.state.allSites.first);
+    const production = '${ProductionGateway.url}/api/jianpian';
+    adapter.body = jsonEncode([
+      _arraySite('a', _apiA),
+      _arraySite('bridge_jianpian', production),
+    ]);
+    await library.refresh(_url);
+    expect(library.state.groups.keys, [_url]);
+    expect(library.state.homeIdentity, _apiA);
+    final restored = library.state.allSites.last;
+    expect(restored.key, 'bridge_jianpian');
+    expect(restored.isBridge, isTrue);
+    await library.selectHome(restored);
+    await library.setEnabled(restored, false);
+
+    library.dispose();
+    adapter.status = 503;
+    library = SourceLibraryNotifier(storage, parser);
+    await start();
+    expect(library.state.allSites.last.isBridge, isTrue);
+    expect(library.state.allSites.last.isEnabled, isFalse);
+    expect(library.state.homeIdentity, production);
+
+    adapter.status = 200;
+    adapter.body = jsonEncode([
+      {
+        ..._arraySite('bridge_jianpian', production, enabled: false),
+        'searchable': false,
+      },
+    ]);
+    await library.refresh(_url);
+    await library.setEnabled(library.state.allSites.single, true);
+    expect(library.state.activeSites, isEmpty);
+    expect(library.state.allSites.single.searchable, isFalse);
+    adapter.body = '[]';
+    await library.refresh(_url);
+    expect(library.state.allSites, isEmpty, reason: '生产片源也由官方 JSON 管理，不另补内置列表');
   });
 
   test('上传的 15 条数组片源可同步，HTTP 行不阻塞整份配置且重启可恢复', () async {

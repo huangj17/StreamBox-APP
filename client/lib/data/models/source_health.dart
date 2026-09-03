@@ -1,4 +1,4 @@
-enum SourceHealthStatus { checking, available, unavailable, unverified }
+enum SourceHealthStatus { queued, checking, available, unavailable, unverified }
 
 class SourceHealth {
   final SourceHealthStatus status;
@@ -15,6 +15,15 @@ class SourceHealth {
     : status = SourceHealthStatus.checking,
       message = '正在检测播放链路',
       checkedAt = null;
+
+  const SourceHealth.queued()
+    : status = SourceHealthStatus.queued,
+      message = '等待空闲检测位置',
+      checkedAt = null;
+
+  bool get isPending =>
+      status == SourceHealthStatus.queued ||
+      status == SourceHealthStatus.checking;
 
   SourceHealth.available({this.message = '播放链路正常'})
     : status = SourceHealthStatus.available,

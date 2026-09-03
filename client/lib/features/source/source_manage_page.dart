@@ -105,9 +105,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
   Widget build(BuildContext context) {
     final library = ref.watch(sourceLibraryProvider);
     final health = ref.watch(sourceHealthProvider);
-    final checking = health.values.any(
-      (h) => h.status == SourceHealthStatus.checking,
-    );
+    final checking = health.values.any((h) => h.isPending);
     final builtIn = library.groups.values
         .where((g) => SourceStorage.isBuiltIn(g.url))
         .toList();

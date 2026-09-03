@@ -10,7 +10,7 @@ void main() {
   group('CmsVideoDetail', () {
     test('解析单线路多集', () {
       final detail = CmsVideoDetail(
-        vodId: 1,
+        vodId: '1',
         vodName: 'Test',
         vodPic: '',
         vodContent: '',
@@ -28,7 +28,7 @@ void main() {
 
     test('解析多线路（\$\$\$ 分隔）', () {
       final detail = CmsVideoDetail(
-        vodId: 1,
+        vodId: '1',
         vodName: 'Test',
         vodPic: '',
         vodContent: '',
@@ -41,7 +41,7 @@ void main() {
 
     test('URL 内含 \$ 时用首个 \$ 作为名称/地址分隔', () {
       final detail = CmsVideoDetail(
-        vodId: 1,
+        vodId: '1',
         vodName: 'Test',
         vodPic: '',
         vodContent: '',
@@ -55,7 +55,7 @@ void main() {
 
     test('按画质排序（1080P 排到 360P 前面）', () {
       final detail = CmsVideoDetail(
-        vodId: 1,
+        vodId: '1',
         vodName: 'Test',
         vodPic: '',
         vodContent: '',
@@ -69,7 +69,7 @@ void main() {
 
     test('空 vodPlayUrl 返回空列表', () {
       final detail = CmsVideoDetail(
-        vodId: 1,
+        vodId: '1',
         vodName: 'Test',
         vodPic: '',
         vodContent: '',

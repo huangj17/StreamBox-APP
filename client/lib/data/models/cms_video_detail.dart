@@ -2,13 +2,15 @@ import 'episode.dart';
 import 'video_item.dart';
 
 class CmsVideoDetail {
-  final int vodId;
+  // Bridge plugins may use paths or slugs, e.g. "1618.html", as video IDs.
+  final String vodId;
   final String vodName;
   final String vodPic;
   final String vodContent;
   final String vodPlayFrom;
   final String vodPlayUrl;
   final String vodPlayParse;
+  final bool isBridge;
   final String? vodYear;
   final String? vodClass;
   final String? vodRemarks;
@@ -27,6 +29,7 @@ class CmsVideoDetail {
     required this.vodPlayFrom,
     required this.vodPlayUrl,
     this.vodPlayParse = '',
+    this.isBridge = false,
     this.vodYear,
     this.vodClass,
     this.vodRemarks,
@@ -38,17 +41,19 @@ class CmsVideoDetail {
     this.vodDoubanScore,
   });
 
-  factory CmsVideoDetail.fromJson(Map<String, dynamic> json) {
+  factory CmsVideoDetail.fromJson(
+    Map<String, dynamic> json, {
+    bool isBridge = false,
+  }) {
     return CmsVideoDetail(
-      vodId: json['vod_id'] is int
-          ? json['vod_id'] as int
-          : int.tryParse(json['vod_id'].toString()) ?? 0,
+      vodId: json['vod_id']?.toString() ?? '',
       vodName: json['vod_name']?.toString() ?? '',
       vodPic: VideoItem.fixCoverUrl(json['vod_pic']?.toString() ?? ''),
       vodContent: _stripHtml(json['vod_content']?.toString() ?? ''),
       vodPlayFrom: json['vod_play_from']?.toString() ?? '',
       vodPlayUrl: json['vod_play_url']?.toString() ?? '',
       vodPlayParse: json['parse']?.toString() ?? '',
+      isBridge: isBridge,
       vodYear: json['vod_year']?.toString(),
       vodClass: json['vod_class']?.toString(),
       vodRemarks: json['vod_remarks']?.toString(),
@@ -115,11 +120,15 @@ class CmsVideoDetail {
             requiresResolve: requiresResolve,
           );
         }
+        final url = ep.substring(dollarIndex + 1);
+        final scheme = Uri.tryParse(url)?.scheme;
         return Episode(
           name: ep.substring(0, dollarIndex),
-          url: ep.substring(dollarIndex + 1),
+          url: url,
           sourceFlag: sourceFlag,
-          requiresResolve: requiresResolve,
+          requiresResolve:
+              requiresResolve ||
+              (isBridge && scheme != 'http' && scheme != 'https'),
         );
       }).toList();
     }).toList();

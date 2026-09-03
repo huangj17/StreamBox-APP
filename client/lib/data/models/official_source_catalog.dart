@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../../core/config/official_sources.dart';
+import '../../core/config/production_gateway.dart';
 import '../../core/network/url_policy.dart';
 import 'site.dart';
 import 'source_config.dart';
@@ -119,12 +120,26 @@ class OfficialSourceCatalog {
       );
       // Preserve old built-in history/favorite keys, including after URL changes.
       final legacyApi = OfficialSources.legacyApis[stableKey];
+      final plugin = ProductionGateway.pluginKey(Uri.parse(api.trim()));
+      final historyKey = legacyApi != null
+          ? legacyApi.hashCode.toString()
+          : ProductionGateway.pluginKeys.any(
+              (key) => stableKey == 'bridge_$key',
+            )
+          ? stableKey
+          : 'official:$stableKey';
       sites.add(
-        Site.fromJson(item).copyWith(
-          key: legacyApi == null
-              ? 'official:$stableKey'
-              : legacyApi.hashCode.toString(),
-        ),
+        plugin != null
+            ? Site.fromGateway(
+                gatewayUrl: ProductionGateway.url,
+                key: plugin,
+                name: item['name'] as String,
+                apiPath: api.trim(),
+                kind: SiteSourceKind.jar,
+                status: GatewaySourceStatus.ready,
+                searchable: item['searchable'] as bool,
+              ).copyWith(key: historyKey, isEnabled: item['isEnabled'] as bool)
+            : Site.fromJson(item).copyWith(key: historyKey),
       );
     }
     // Display-only content revision: whitespace and object key order do not

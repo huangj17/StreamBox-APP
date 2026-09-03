@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import '../../core/config/production_gateway.dart';
 import '../../core/network/bounded_response.dart';
 import '../../core/network/gateway_auth.dart';
 import '../../core/network/url_policy.dart';
@@ -36,10 +37,13 @@ class CmsApi {
       _dio,
       url.toString(),
       queryParameters: queryParameters,
-      headers: gateway ? GatewayAuth.headers : null,
+      headers: gateway ? GatewayAuth.headersFor(url) : null,
       sendTimeout: sendTimeout,
       receiveTimeout: receiveTimeout,
       cancelToken: cancelToken,
+      redirectValidator: ProductionGateway.isOrigin(url)
+          ? (next) => ProductionGateway.validateRedirect(url, next)
+          : null,
       maxBytes: _maxCmsResponseBytes,
     );
     final trimmed = text.trimLeft();
@@ -113,7 +117,10 @@ class CmsApi {
     if (list.isEmpty) return null;
     final first = list.first;
     if (first is! Map) return null;
-    return CmsVideoDetail.fromJson(Map<String, dynamic>.from(first));
+    return CmsVideoDetail.fromJson(
+      Map<String, dynamic>.from(first),
+      isBridge: site.isBridge,
+    );
   }
 
   /// 调用 JAR Bridge 的 playerContent，取得真实播放地址和必须透传的请求头。
@@ -144,7 +151,10 @@ class CmsApi {
       throw const FormatException('Bridge 未返回有效播放地址');
     }
     final url = UrlPolicy.requirePlaybackUrl(rawResolvedUrl).toString();
-    final rawHeaders = data['header'];
+    final header = data['header'];
+    final rawHeaders = header is String && header.trim().isNotEmpty
+        ? jsonDecode(header)
+        : header;
     final headers = rawHeaders is Map
         ? rawHeaders.map(
             (key, value) => MapEntry(key.toString(), value.toString()),

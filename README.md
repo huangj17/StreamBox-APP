@@ -1,14 +1,35 @@
 # StreamBox
 
-Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。本仓库为 Monorepo，包含 Flutter 客户端和 JAR Bridge 中间服务。**（可安装至TV电视、投影仪等）**
+Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。以电视、电视盒子和投影仪的遥控器操作为优先，同时适配桌面键鼠与手机触摸。本仓库为 Monorepo，包含 Flutter 客户端和 JAR Bridge 中间服务。
+
+## 页面与交互
+
+- **沉浸首页**：侧边导航、轮播推荐、继续观看和分类内容行；首页片源统一在设置中选择，顶部不再占用一整行。
+- **聚合搜索**：宽屏采用左侧搜索与历史、右侧结果网格；加宽海报卡片，片名与来源分层显示，方向键移动时自动滚动并保留焦点。
+- **遥控播放**：底部集中显示时间轴和常用操作，选集、线路与设置使用侧栏；左右键调整进度，松手自动跳转。
+- **片源管理**：显示当前首页片源与搜索范围，按官方片源和自定义集合切换；确认片源行即可设置首页、启停片源或重新检测。健康检测最多 6 个片源同时进行，完成即补位，单源 12 秒超时；「等待检测」与「检测中」分别显示。
+
+具体操作见 [客户端使用方法与遥控器指南](client/README.md#使用方法)。
 
 ## 预览
 
-![首页截图](client/assets/screenshot.png)
+以下为 2026-09-03 在 macOS 运行当前版本截取的真实页面。截图展示宽屏布局；TV 遥控器与系统输入法仍需实机验收。
+
+![首页：侧边导航、轮播推荐与继续观看](client/assets/screenshots/home.jpg)
+
+| 搜索：加宽卡片、搜索历史与来源信息 | 设置：片源分组、首页选择与搜索范围 |
+| --- | --- |
+| ![搜索结果页面](client/assets/screenshots/search.jpg) | ![片源管理页面](client/assets/screenshots/sources.jpg) |
+| 播放：时间轴与常用操作集中在底部 | 播放侧栏：倍速、音量与播放信息 |
+| ![播放控制页面](client/assets/screenshots/player.jpg) | ![播放设置侧栏](client/assets/screenshots/player-settings.jpg) |
+
+点击图片可查看大图。[截图说明](client/assets/screenshots/README.md)。
+
+### 早期版本演示视频
 
 <video src="https://github.com/huangj17/StreamBox-APP/raw/main/client/assets/StreamBox.mp4" controls width="720"></video>
 
-> 视频如未在 GitHub 网页内联播放，可点击 [此处下载查看](client/assets/StreamBox.mp4)。
+> 视频保留早期版本的操作演示，当前界面以上方截图为准。如未在 GitHub 网页内联播放，可点击 [此处下载查看](client/assets/StreamBox.mp4)。
 
 ## 仓库结构
 
@@ -30,7 +51,7 @@ StreamBox (Flutter) --HTTP--> StreamBox Gateway --Spider--> 内容站点
 - Gateway 不自带片源，需要自行准备 Spider JAR 并写入 `config.yml`
 - 每个 source 的 API 格式与苹果 CMS 完全兼容（`ac=class`、`ac=detail`、`wd=` 等）
 - Gateway 是可选组件，StreamBox 在没有 Gateway 时仍可直接使用 CMS 源
-- 客户端默认连接 `http://localhost:9978`
+- 原生产 Bridge 的三个片源与 CMS 源共用官方列表；本机 Bridge 可通过「添加配置源」接入 `http://localhost:9978`
 
 ## 快速开始
 
@@ -81,7 +102,23 @@ flutter run -d macos
 
 片源页只展示简短同步状态；版本、地址、检查频率和完整错误可从「详情」查看。启动时会一次性移除已被官方缓存覆盖的重复 OuonnkiTV Lite 订阅，保留原地址、缓存及片源偏好，仍可手动重新添加恢复；含独有片源的订阅不受影响。
 
-默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；仅这个固定配置入口例外，其他订阅、CMS 和 Gateway 的安全限制不变。初始文件：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；固定官方配置入口及原生产 Bridge 的三个指定 API 允许 HTTP，其他订阅、CMS 和 Gateway 的安全限制不变。待发布的完整列表：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+
+### 恢复原生产片源
+
+[合并配置](deploy/streambox/sources.json) 保留 2026-09-03 线上已有的 16 个片源及顺序，在「官方片源」同一个列表末尾追加以下 3 个，共 19 个。更新客户端并将该文件发布到官方配置地址后，在设置中选择「立即更新」即可加载；不会添加独立分组，也不会改变当前首页或本地启停偏好。
+
+| 片源 | 生产 CMS 接口 |
+| --- | --- |
+| 荐片视频 | `http://1.14.171.39:9978/api/jianpian` |
+| 爱看机器人 | `http://1.14.171.39:9978/api/ikanbot` |
+| 异世界动漫 | `http://1.14.171.39:9978/api/ysj` |
+
+如果上传后这三个源仍显示「暂不兼容」，先更新并重启客户端。JSON 只更新片源目录，不会更新正在运行的程序；旧客户端仍会拦截这些 HTTP 接口。更新后「待验证」表示后台尚未测通媒体，不妨碍选择首页或尝试播放。
+
+这三个接口由原 JAR Bridge 提供，客户端保留原片源身份、字符串影片 ID 和剧集解析流程；生产请求不发送个人 `STREAMBOX_GATEWAY_TOKEN`。片源增删、排序和启停仍由服务器 JSON 决定，没有额外的内置兜底列表。
+
+验证范围：三个源的分类、搜索和详情可返回内容；2026-09-03 使用重新编译的 macOS 客户端，荐片视频《火遮眼2025》已实际播放并推进到 00:25；异世界动漫抽样线路仍返回需要网页解析的地址，当前播放器会明确提示无法直接播放。接口在线不代表全部影片或线路可播放。
 
 ## 环境要求
 
@@ -89,42 +126,6 @@ flutter run -d macos
 | ---------- | --------------------------------------------------------- |
 | client     | Flutter SDK >= 3.11、Dart SDK >= 3.11、CocoaPods（macOS） |
 | jar-bridge | JDK 21+                                                   |
-
-## 路线图
-
-欢迎通过 Issue / PR 参与贡献。优先级以用户反馈为准。
-
-### 优化项
-
-- [x] **TV 遥控器交互** — 焦点流转、按键映射、长按行为打磨
-  - 首页 `SideNavBar` 替代 TopNav，悬浮展开，左红条选中态 + 红环焦点态
-  - 详情页 / 搜索页 / 设置页 / 收藏 / 历史 全面接入 `TvFocusable` 红环+光晕规范
-  - 详情页：autofocus「播放」/「继续观看」、长按 OK 集数弹「从头播放 / 复制链接」、续播文案「继续 第 N 集 mm:ss」+「从头播放」次按钮、长简介展开模态
-  - 搜索页：autofocus 输入框、历史 chip 长按 OK 删除、错误文案收敛（不再 dump stack）
-  - 共享组件 `TvActionButton`（primary/secondary/red/text）+ `TvBackButton` 统一全站按钮焦点视觉
-- [x] **切源稳定性** — 消除偶发的"切源失败需多次点击"问题
-  - 历史/收藏/搜索/Banner Play 5 处 `firstWhere` 静默吞 `StateError` 导致「点不动」 → 统一走 `navigateToVideoDetail` helper：找不到源弹 SnackBar「『xxx』所在的片源已下架或未启用」+「去搜索」action 预填关键词跨源回查
-  - 历史 tile 失效项视觉降级：封面灰化 + 红字「片源已下架」
-- [ ] **大列表滚动性能** — 封面预取与图片缓存策略
-- [x] **错误提示与重试** — 网络异常的引导更友好，避免空白页
-  - 搜索 `_friendlyError`：500 → 「服务暂不可用」、SocketException/Timeout → 「网络不可达」、其它截 60 字
-  - 详情 `加载失败: 该片源暂不支持此视频`（500 分支）替代裸 stack
-  - 播放器 30 秒首帧 stuck timeout：libmpv 卡 buffering 不报错时自动弹「重试 / 切线路」遮罩，不再永远转圈
-  - 失效片源 SnackBar 反馈 + 跨源回查（见上）
-- [x] **首屏起播提速 & 稳定性** — DNS 预解析 + libmpv 调优
-  - 详情页进入时对最可能播放的 URL 做 DNS 预解析（`InternetAddress.lookup`），节省 50–200 ms 首帧时间。原 `dio.head` 预热被部分站点视为消耗单次 token 导致 libmpv 拿不到流，已停用
-  - libmpv：`bufferSize 64 MiB` / `cache-secs 30` / `demuxer-readahead-secs 20` / `cache-pause-initial no` / `network-timeout 10` / `vd-lavc-threads 4`
-
-### 待开发功能
-
-- [ ] **直播频道** — IPTV / M3U 源支持
-- [ ] **弹幕** — 第三方弹幕源对接
-- [ ] **投屏** — DLNA / AirPlay / Chromecast
-- [ ] **字幕** — 外挂字幕加载、字号 / 颜色 / 偏移调整
-- [ ] **跳过片头片尾** — 手动设置 + 自动记忆
-- [ ] **搜索增强** — 历史记录、关键词建议、按类型/年份筛选
-- [ ] **国际化（i18n）** — 多语言界面
-- [ ] **主题** — 亮色 / 暗色 / 自定义强调色
 
 ## 更新日志
 

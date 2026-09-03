@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import '../../core/config/production_gateway.dart';
 
 import '../../core/network/bounded_response.dart';
 import '../../core/network/gateway_auth.dart';
@@ -39,33 +40,43 @@ class SourceHealthChecker {
   }) : _parser = parser ?? SourceParser(_dio),
        _resolveHost = resolveHost ?? InternetAddress.lookup;
 
-  Future<SourceHealth> check(String sourceUrl) async {
+  Future<SourceHealth> check(
+    String sourceUrl, {
+    CancelToken? cancelToken,
+  }) async {
     try {
       if (SourceParser.isJarBridgeUrl(sourceUrl)) {
-        return await _checkGateway(sourceUrl);
+        return await _checkGateway(sourceUrl, cancelToken: cancelToken);
       }
       if (SourceParser.isCmsApiUrl(sourceUrl)) {
-        return await _checkCms(sourceUrl);
+        return await _checkCms(sourceUrl, cancelToken: cancelToken);
       }
-      return await _checkConfig(sourceUrl);
+      return await _checkConfig(sourceUrl, cancelToken: cancelToken);
     } catch (error) {
       return SourceHealth.unavailable(message: _friendlyError(error));
     }
   }
 
   /// 已由配置解析器确认的 CMS 接口，无需再根据 URL 路径猜测格式。
-  Future<SourceHealth> checkCms(String sourceUrl) async {
+  Future<SourceHealth> checkCms(
+    String sourceUrl, {
+    CancelToken? cancelToken,
+  }) async {
     try {
-      return await _checkCms(sourceUrl);
+      return await _checkCms(sourceUrl, cancelToken: cancelToken);
     } catch (error) {
       return SourceHealth.unavailable(message: _friendlyError(error));
     }
   }
 
-  Future<SourceHealth> _checkGateway(String sourceUrl) async {
+  Future<SourceHealth> _checkGateway(
+    String sourceUrl, {
+    CancelToken? cancelToken,
+  }) async {
     final origin = Uri.parse(sourceUrl);
     final config = await _parser.probeGateway(
       sourceUrl,
+      cancelToken: cancelToken,
       redirectValidator: (uri) => _validateRedirect(
         uri,
         requireHttps: true,
@@ -80,10 +91,14 @@ class SourceHealthChecker {
     );
   }
 
-  Future<SourceHealth> _checkConfig(String sourceUrl) async {
+  Future<SourceHealth> _checkConfig(
+    String sourceUrl, {
+    CancelToken? cancelToken,
+  }) async {
     final origin = Uri.parse(sourceUrl);
     final document = await _parser.parseDocument(
       sourceUrl,
+      cancelToken: cancelToken,
       redirectValidator: (uri) => _validateRedirect(
         uri,
         requireHttps: true,
@@ -103,25 +118,59 @@ class SourceHealthChecker {
     return SourceHealth.unavailable(message: '配置中没有可用站点或仓库');
   }
 
-  Future<SourceHealth> _checkCms(String sourceUrl) async {
+  Future<SourceHealth> _checkCms(
+    String sourceUrl, {
+    CancelToken? cancelToken,
+  }) async {
     final site = SourceParser.wrapCmsUrl(sourceUrl).sites.single;
-    final headers = site.isBridge ? GatewayAuth.headers : null;
+    final origin = Uri.parse(site.api);
+    final headers = site.isBridge ? GatewayAuth.headersFor(origin) : null;
+    Future<String> fetch(Map<String, dynamic> query) => getBoundedText(
+      _dio,
+      site.api,
+      queryParameters: query,
+      headers: headers,
+      sendTimeout: _requestTimeout,
+      receiveTimeout: _requestTimeout,
+      redirectValidator: ProductionGateway.isOrigin(origin)
+          ? (uri) => ProductionGateway.validateRedirect(origin, uri)
+          : (uri) => _validateRedirect(
+              uri,
+              requireHttps: true,
+              allowedLocalOrigin: origin,
+            ),
+      maxBytes: _maxCmsBytes,
+      cancelToken: cancelToken,
+    );
     final String payload;
     try {
-      payload = await getBoundedText(
-        _dio,
-        site.api,
-        queryParameters: const {'ac': 'detail', 'pg': 1},
-        headers: headers,
-        sendTimeout: _requestTimeout,
-        receiveTimeout: _requestTimeout,
-        redirectValidator: (uri) => _validateRedirect(
-          uri,
-          requireHttps: true,
-          allowedLocalOrigin: Uri.parse(site.api),
-        ),
-        maxBytes: _maxCmsBytes,
-      );
+      if (ProductionGateway.isApi(origin)) {
+        // Legacy Bridge rejects ac=detail without either a category or IDs.
+        // Some plugins include recommendations in their class response.
+        final home = await fetch(const {'ac': 'class'});
+        final data = _decodeCmsPayload(home);
+        if (data['list'] is List && (data['list'] as List).isNotEmpty) {
+          payload = home;
+        } else {
+          final categories = data['class'];
+          final category = categories is List
+              ? categories
+                    .whereType<Map>()
+                    .where((c) => c['type_id'] != null)
+                    .firstOrNull
+              : null;
+          if (category == null) {
+            return SourceHealth.unavailable(message: '片源未返回分类或内容');
+          }
+          payload = await fetch({
+            'ac': 'detail',
+            't': category['type_id'].toString(),
+            'pg': 1,
+          });
+        }
+      } else {
+        payload = await fetch(const {'ac': 'detail', 'pg': 1});
+      }
     } catch (error) {
       return SourceHealth.unavailable(
         message: '列表接口不可用：${_friendlyError(error)}',
@@ -141,8 +190,13 @@ class SourceHealthChecker {
 
     Object? lastError;
     for (final candidate in candidates) {
+      if (cancelToken?.isCancelled ?? false) throw cancelToken!.cancelError!;
       try {
-        await _probePlayback(candidate, headers: headers);
+        await _probePlayback(
+          candidate,
+          headers: headers,
+          cancelToken: cancelToken,
+        );
         return SourceHealth.available();
       } catch (error) {
         lastError = error;
@@ -197,12 +251,21 @@ class SourceHealthChecker {
       path.endsWith('.flv') ||
       path.endsWith('.ts');
 
-  Future<void> _probePlayback(Uri uri, {Map<String, dynamic>? headers}) async {
+  Future<void> _probePlayback(
+    Uri uri, {
+    Map<String, dynamic>? headers,
+    CancelToken? cancelToken,
+  }) async {
     final validated = UrlPolicy.requirePlaybackUrl(uri.toString());
     if (validated.path.toLowerCase().endsWith('.m3u8')) {
-      await _probeHls(validated, headers: headers, depth: 0);
+      await _probeHls(
+        validated,
+        headers: headers,
+        depth: 0,
+        cancelToken: cancelToken,
+      );
     } else {
-      await _probeBinary(validated, headers: headers);
+      await _probeBinary(validated, headers: headers, cancelToken: cancelToken);
     }
   }
 
@@ -210,6 +273,7 @@ class SourceHealthChecker {
     Uri playlist, {
     Map<String, dynamic>? headers,
     required int depth,
+    CancelToken? cancelToken,
   }) async {
     if (depth > 2) throw const _ProbeException('HLS 清单嵌套过深');
     await _ensurePublicDns(playlist.host);
@@ -221,6 +285,7 @@ class SourceHealthChecker {
       receiveTimeout: _requestTimeout,
       redirectValidator: (uri) => _validateRedirect(uri),
       maxBytes: _maxPlaylistBytes,
+      cancelToken: cancelToken,
     );
     final text = response.text;
     if (!text.trimLeft().startsWith('#EXTM3U')) {
@@ -230,15 +295,22 @@ class SourceHealthChecker {
     // 发生跳转后，相对的 key/variant/segment 必须以最终清单地址为基准。
     final playlistBase = response.uri;
     final key = _hlsKeyUri(text, playlistBase);
-    if (key != null) await _probeBinary(key, headers: headers);
+    if (key != null) {
+      await _probeBinary(key, headers: headers, cancelToken: cancelToken);
+    }
 
     final media = _firstHlsUri(text, playlistBase);
     if (media == null) throw const _ProbeException('HLS 清单中没有媒体分片');
     // HLS variant URI 不要求带 .m3u8 后缀，按 master-playlist 指令判断。
     if (_isMasterPlaylist(text)) {
-      await _probeHls(media, headers: headers, depth: depth + 1);
+      await _probeHls(
+        media,
+        headers: headers,
+        depth: depth + 1,
+        cancelToken: cancelToken,
+      );
     } else {
-      await _probeBinary(media, headers: headers);
+      await _probeBinary(media, headers: headers, cancelToken: cancelToken);
     }
   }
 
@@ -267,7 +339,11 @@ class SourceHealthChecker {
     caseSensitive: false,
   ).hasMatch(playlist);
 
-  Future<void> _probeBinary(Uri uri, {Map<String, dynamic>? headers}) async {
+  Future<void> _probeBinary(
+    Uri uri, {
+    Map<String, dynamic>? headers,
+    CancelToken? cancelToken,
+  }) async {
     final validated = UrlPolicy.requirePlaybackUrl(uri.toString());
     await _ensurePublicDns(validated.host);
     var requestHeaders = <String, dynamic>{
@@ -280,6 +356,7 @@ class SourceHealthChecker {
     for (var redirectCount = 0; ; redirectCount++) {
       final response = await _dio.get<ResponseBody>(
         current.toString(),
+        cancelToken: cancelToken,
         options: Options(
           responseType: ResponseType.stream,
           headers: requestHeaders,

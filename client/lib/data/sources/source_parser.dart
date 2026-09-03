@@ -1,5 +1,6 @@
 import 'dart:convert';
 import '../../core/config/official_sources.dart';
+import '../../core/config/production_gateway.dart';
 import 'package:dio/dio.dart';
 import '../../core/network/bounded_response.dart';
 import '../../core/network/gateway_auth.dart';
@@ -65,8 +66,13 @@ class SourceParser {
   Future<ParsedSourceDocument> parseDocument(
     String url, {
     RedirectUriValidator? redirectValidator,
+    CancelToken? cancelToken,
   }) async {
-    final json = await _fetchJson(url, redirectValidator: redirectValidator);
+    final json = await _fetchJson(
+      url,
+      redirectValidator: redirectValidator,
+      cancelToken: cancelToken,
+    );
     final warehouses = _tryParseWarehouses(json);
     if (warehouses != null && warehouses.isNotEmpty) {
       return ParsedSourceDocument(warehouses: warehouses);
@@ -88,6 +94,7 @@ class SourceParser {
   Future<Map<String, dynamic>> _fetchJson(
     String url, {
     RedirectUriValidator? redirectValidator,
+    CancelToken? cancelToken,
   }) async {
     final validated = UrlPolicy.requireConfigUrl(url);
     final jsonStr = await getBoundedText(
@@ -96,6 +103,7 @@ class SourceParser {
       receiveTimeout: const Duration(seconds: 15),
       redirectValidator: redirectValidator,
       maxBytes: _maxConfigBytes,
+      cancelToken: cancelToken,
     );
     final decoded = jsonDecode(jsonStr);
     if (decoded is List ||
@@ -234,6 +242,7 @@ class SourceParser {
   Future<SourceConfig?> probeGateway(
     String gatewayUrl, {
     RedirectUriValidator? redirectValidator,
+    CancelToken? cancelToken,
   }) async {
     final baseUrl = gatewayUrl.endsWith('/')
         ? gatewayUrl.substring(0, gatewayUrl.length - 1)
@@ -248,11 +257,20 @@ class SourceParser {
       final body = await getBoundedText(
         _dio,
         '$baseUrl/api/list',
-        headers: GatewayAuth.headers,
+        headers: GatewayAuth.headersFor(baseUri),
         sendTimeout: const Duration(seconds: 2),
         receiveTimeout: const Duration(seconds: 2),
-        redirectValidator: redirectValidator,
+        redirectValidator: ProductionGateway.isOrigin(baseUri)
+            ? (next) async {
+                ProductionGateway.validateRedirect(
+                  baseUri.resolve('/api/list'),
+                  next,
+                );
+                await redirectValidator?.call(next);
+              }
+            : redirectValidator,
         maxBytes: _maxGatewayListBytes,
+        cancelToken: cancelToken,
       );
       final decoded = jsonDecode(body);
       if (decoded is! Map<String, dynamic> || decoded['code'] != 200) {
@@ -295,6 +313,10 @@ class SourceParser {
             resolved.host != baseUri.host ||
             resolved.port != baseUri.port) {
           return null;
+        }
+        if (ProductionGateway.isOrigin(baseUri) &&
+            ProductionGateway.pluginKey(resolved) == null) {
+          continue;
         }
         sites.add(site);
       }

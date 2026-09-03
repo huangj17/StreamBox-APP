@@ -1,5 +1,6 @@
 import 'dart:io';
 import '../config/official_sources.dart';
+import '../config/production_gateway.dart';
 
 /// Untrusted configuration and CMS responses must not select arbitrary local
 /// files/protocol handlers or literal private-network endpoints.
@@ -35,6 +36,7 @@ class UrlPolicy {
 
   static Uri requireGatewayUrl(String raw) {
     final uri = _parse(raw);
+    if (ProductionGateway.isRoot(uri)) return uri;
     if (uri.scheme == 'https') return uri;
     if (uri.scheme == 'http' && _isLoopbackHost(uri.host)) return uri;
     throw const FormatException('远程 Gateway 必须使用 HTTPS');
@@ -42,6 +44,7 @@ class UrlPolicy {
 
   static Uri requireCmsApiUrl(String raw, {bool allowLoopback = false}) {
     final uri = _parse(raw);
+    if (ProductionGateway.isApi(uri)) return uri;
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       throw const FormatException('CMS API 只允许 HTTP(S) 地址');
     }

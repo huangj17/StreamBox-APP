@@ -56,11 +56,19 @@ void main() {
     // Official sources now come only from a successful remote snapshot.
     await storage.saveOfficialSnapshot(
       OfficialSourceSnapshot(
-        OfficialSourceCatalog.fromJson(
-          jsonDecode(
-            File('../deploy/streambox/sources.json').readAsStringSync(),
-          ),
-        ),
+        // Keep this deduplication fixture independent of the production list.
+        OfficialSourceCatalog.fromJson([
+          {
+            'id': 'baofeng',
+            'name': '暴风资源',
+            'url': SourceStorage.builtInUrls.first,
+          },
+          {
+            'id': 'www-hongniuzy-com',
+            'name': '红牛资源',
+            'url': SourceStorage.builtInUrls.last,
+          },
+        ]),
         DateTime.utc(2026, 9, 2),
       ),
     );

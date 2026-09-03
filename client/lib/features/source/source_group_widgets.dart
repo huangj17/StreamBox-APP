@@ -553,12 +553,13 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
         ),
         const SizedBox(height: 12),
         _SourceButton(
-          label: health?.status == SourceHealthStatus.checking
+          label: health?.status == SourceHealthStatus.queued
+              ? '等待检测'
+              : health?.status == SourceHealthStatus.checking
               ? '检测中…'
               : '重新检测',
           icon: Icons.refresh_rounded,
-          onActivate:
-              !site.isSupported || health?.status == SourceHealthStatus.checking
+          onActivate: !site.isSupported || (health?.isPending ?? false)
               ? null
               : () => ref.read(sourceHealthProvider.notifier).refreshUrls([
                   site.api,

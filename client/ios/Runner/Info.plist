@@ -28,7 +28,7 @@
 		<true/>
 		<key>NSAppTransportSecurity</key>
 		<dict>
-			<!-- TVBox 媒体地址可能是 HTTP；UrlPolicy 仅对固定官方配置 URL 例外，用户配置/CMS/Gateway 仍要求 HTTPS。 -->
+			<!-- TVBox 媒体可用 HTTP；UrlPolicy 另允许固定官方配置及原生产 Bridge 指定 API，其余远程配置/CMS/Gateway 仍要求 HTTPS。 -->
 			<key>NSAllowsArbitraryLoadsForMedia</key>
 			<true/>
 			<key>NSAllowsLocalNetworking</key>

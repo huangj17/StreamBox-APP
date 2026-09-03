@@ -289,6 +289,7 @@ class SourceHealthBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (health.status) {
+      SourceHealthStatus.queued => ('等待检测', AppColors.secondaryText),
       SourceHealthStatus.checking => ('检测中', const Color(0xFF8CB9FF)),
       SourceHealthStatus.available => ('可用', AppColors.success),
       SourceHealthStatus.unavailable => ('不可用', const Color(0xFFFF7079)),

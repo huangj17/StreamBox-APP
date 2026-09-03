@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -70,104 +71,153 @@ final sourceHealthUrlsProvider = Provider<List<String>>((ref) {
 class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
   static const refreshInterval = Duration(minutes: 15);
   static const startupDelay = Duration(seconds: 2);
-  static const _concurrency = 3;
 
   final SourceHealthChecker _checker;
   final bool cmsOnly;
+  final int maxConcurrentChecks;
+  final Duration checkTimeout;
   Timer? _startupTimer;
   Timer? _periodicTimer;
   List<String> _sources = const [];
-  bool _refreshing = false;
-  bool _refreshQueued = false;
+  final _pending = Queue<_HealthCheckJob>();
+  final _jobs = <String, _HealthCheckJob>{};
+  int _running = 0;
   bool _disposed = false;
 
-  SourceHealthNotifier(this._checker, {this.cmsOnly = false}) : super(const {});
+  SourceHealthNotifier(
+    this._checker, {
+    this.cmsOnly = false,
+    this.maxConcurrentChecks = 6,
+    this.checkTimeout = const Duration(seconds: 12),
+  }) : assert(maxConcurrentChecks > 0),
+       assert(checkTimeout > Duration.zero),
+       super(const {});
 
   void setSources(List<String> urls) {
     if (_disposed) return;
-    final unique = urls.toSet().toList(growable: false);
+    final unique = urls.toSet();
     final previousSources = _sources.toSet();
-    _sources = unique;
+    _sources = unique.toList(growable: false);
+    for (final job in _jobs.values.toList()) {
+      if (unique.contains(job.url)) continue;
+      _jobs.remove(job.url);
+      _pending.remove(job);
+      job.cancel('片源已移除');
+    }
     state = {
-      for (final url in unique)
-        url: state[url] ?? const SourceHealth.checking(),
+      for (final url in unique) url: state[url] ?? const SourceHealth.queued(),
     };
 
     if (unique.isEmpty) {
       _startupTimer?.cancel();
+      _startupTimer = null;
       _periodicTimer?.cancel();
       _periodicTimer = null;
       return;
     }
-
     _periodicTimer ??= Timer.periodic(refreshInterval, (_) {
       unawaited(refreshAll());
     });
 
-    final added = unique
-        .where((url) => !previousSources.contains(url))
-        .toList();
     if (previousSources.isEmpty) {
       _startupTimer?.cancel();
       _startupTimer = Timer(startupDelay, () => unawaited(refreshAll()));
-    } else if (added.isNotEmpty) {
-      unawaited(_refresh(added));
+    } else if (!(_startupTimer?.isActive ?? false)) {
+      unawaited(_refresh(unique.difference(previousSources).toList()));
     }
   }
 
-  Future<void> refreshAll() => _refresh(_sources);
+  Future<void> refreshAll() {
+    _startupTimer?.cancel();
+    _startupTimer = null;
+    return _refresh(_sources);
+  }
+
   Future<void> refreshUrls(List<String> urls) => _refresh(urls);
 
-  /// 仅刷新超过 [maxAge] 未检测的片源。
-  ///
-  /// macOS 窗口每次重新获得焦点都会触发 resumed；这里避免普通切窗绕过
-  /// 15 分钟周期，仍能在应用长时间处于后台后及时补一次检测。
+  /// 前台恢复仅检测过期项，已排队或正在检测的项目共享原任务。
   Future<void> refreshStale({Duration maxAge = refreshInterval}) {
     final cutoff = DateTime.now().subtract(maxAge);
-    final stale = _sources
-        .where((url) {
-          final health = state[url];
-          if (health?.status == SourceHealthStatus.checking) return false;
-          final checkedAt = health?.checkedAt;
-          return checkedAt == null || checkedAt.isBefore(cutoff);
-        })
-        .toList(growable: false);
-    return _refresh(stale);
+    return _refresh(
+      _sources.where((url) {
+        final health = state[url];
+        if (health?.isPending ?? false) return false;
+        final checkedAt = health?.checkedAt;
+        return checkedAt == null || checkedAt.isBefore(cutoff);
+      }).toList(),
+    );
   }
 
   Future<void> _refresh(List<String> requested) async {
     if (_disposed || requested.isEmpty) return;
-    if (_refreshing) {
-      _refreshQueued = true;
-      return;
+    final waiting = <Future<void>>[];
+    final nextState = {...state};
+    for (final url in requested.toSet()) {
+      if (!_sources.contains(url)) continue;
+      var job = _jobs[url];
+      if (job == null) {
+        job = _HealthCheckJob(url);
+        _jobs[url] = job;
+        _pending.add(job);
+        nextState[url] = const SourceHealth.queued();
+      }
+      waiting.add(job.done.future);
     }
-    _refreshing = true;
-    try {
-      final current = _sources.toSet();
-      final targets = requested.where(current.contains).toList(growable: false);
-      for (var offset = 0; offset < targets.length; offset += _concurrency) {
-        if (_disposed) return;
-        final end = offset + _concurrency < targets.length
-            ? offset + _concurrency
-            : targets.length;
-        final batch = targets.sublist(offset, end);
-        await Future.wait(batch.map(_checkOne));
-      }
-    } finally {
-      _refreshing = false;
-      if (_refreshQueued && !_disposed) {
-        _refreshQueued = false;
-        unawaited(refreshAll());
-      }
+    state = nextState;
+    _pump();
+    await Future.wait(waiting);
+  }
+
+  /// 每空出一个位置就立即补一个任务，不等待同批最慢的片源。
+  void _pump() {
+    while (!_disposed &&
+        _running < maxConcurrentChecks &&
+        _pending.isNotEmpty) {
+      final job = _pending.removeFirst();
+      if (!_isCurrent(job)) continue;
+      _running++;
+      unawaited(_checkOne(job));
     }
   }
 
-  Future<void> _checkOne(String url) async {
-    if (!_sources.contains(url) || _disposed) return;
-    state = {...state, url: const SourceHealth.checking()};
-    final result = await (cmsOnly ? _checker.checkCms(url) : _checker.check(url));
-    if (!_sources.contains(url) || _disposed) return;
-    state = {...state, url: result};
+  bool _isCurrent(_HealthCheckJob job) =>
+      !_disposed && identical(_jobs[job.url], job);
+
+  Future<void> _checkOne(_HealthCheckJob job) async {
+    try {
+      state = {...state, job.url: const SourceHealth.checking()};
+      final result =
+          await Future.any<SourceHealth>([
+            Future.sync(
+              () => cmsOnly
+                  ? _checker.checkCms(job.url, cancelToken: job.token)
+                  : _checker.check(job.url, cancelToken: job.token),
+            ),
+            job.token.whenCancel.then<SourceHealth>((error) => throw error),
+          ]).timeout(
+            checkTimeout,
+            onTimeout: () {
+              // Cancel the HTTP/stream work as well as releasing the worker slot.
+              job.token.cancel('片源检测超时');
+              return SourceHealth.unavailable(
+                message: '检测超时（${checkTimeout.inSeconds} 秒），可重新检测',
+              );
+            },
+          );
+      if (_isCurrent(job)) state = {...state, job.url: result};
+    } catch (_) {
+      if (_isCurrent(job)) {
+        state = {
+          ...state,
+          job.url: SourceHealth.unavailable(message: '检测失败，可重试'),
+        };
+      }
+    } finally {
+      if (_isCurrent(job)) _jobs.remove(job.url);
+      job.cancel('检测结束');
+      _running--;
+      _pump();
+    }
   }
 
   @override
@@ -175,7 +225,24 @@ class SourceHealthNotifier extends StateNotifier<Map<String, SourceHealth>> {
     _disposed = true;
     _startupTimer?.cancel();
     _periodicTimer?.cancel();
+    for (final job in _jobs.values) {
+      job.cancel('检测器已关闭');
+    }
+    _jobs.clear();
+    _pending.clear();
     super.dispose();
+  }
+}
+
+class _HealthCheckJob {
+  final String url;
+  final token = CancelToken();
+  final done = Completer<void>();
+  _HealthCheckJob(this.url);
+
+  void cancel(String reason) {
+    token.cancel(reason);
+    if (!done.isCompleted) done.complete();
   }
 }
 
