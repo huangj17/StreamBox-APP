@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/streambox_icon_background" />
+    <foreground>
+        <!-- 60.48dp logo inside a 108dp layer: safe for circular and rounded masks. -->
+        <inset android:inset="22%">
+            <bitmap android:src="@drawable/streambox_logo" android:gravity="fill" />
+        </inset>
+    </foreground>
+</adaptive-icon>

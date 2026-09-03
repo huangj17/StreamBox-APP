@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TV app rows use this 16:9 banner instead of inventing a tile from the logo's colors. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <size android:width="160dp" android:height="90dp" />
+            <solid android:color="@color/streambox_icon_background" />
+        </shape>
+    </item>
+    <item android:width="40dp" android:height="40dp"
+        android:gravity="top|center_horizontal" android:top="13dp">
+        <bitmap android:src="@drawable/streambox_logo" android:gravity="fill" />
+    </item>
+    <item android:width="104dp" android:height="18dp"
+        android:gravity="bottom|center_horizontal" android:bottom="13dp"
+        android:drawable="@drawable/streambox_wordmark" />
+</layer-list>

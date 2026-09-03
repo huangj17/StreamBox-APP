@@ -48,7 +48,9 @@ flutter:
 
 flutter_launcher_icons:
   image_path: "assets/icon.png"
-  android: "ic_launcher"
+  # Android 用原生 XML 固定黑底（含 adaptive icon / TV banner），避免生成器覆盖入口。
+  # 资源说明见 assets/icon/README.md。
+  android: false
   ios: true
   remove_alpha_ios: true
   min_sdk_android: 21
