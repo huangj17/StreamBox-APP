@@ -23,6 +23,8 @@ import 'engine/video_engine.dart';
 import 'engine/video_engine_factory.dart';
 import 'player_buffering.dart';
 part 'player_widgets.dart';
+part 'player_controls.dart';
+part 'player_panels.dart';
 
 bool _isConfirmKey(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.select ||
@@ -30,10 +32,11 @@ bool _isConfirmKey(LogicalKeyboardKey key) =>
     key == LogicalKeyboardKey.numpadEnter ||
     key == LogicalKeyboardKey.gameButtonA;
 
-bool _isPlayPauseKey(LogicalKeyboardKey key) =>
-    _isConfirmKey(key) ||
-    key == LogicalKeyboardKey.space ||
-    key == LogicalKeyboardKey.mediaPlayPause;
+bool _isBackKey(LogicalKeyboardKey key) =>
+    key == LogicalKeyboardKey.escape ||
+    key == LogicalKeyboardKey.goBack ||
+    key == LogicalKeyboardKey.browserBack ||
+    key == LogicalKeyboardKey.gameButtonB;
 
 @immutable
 class _LoadingUiState {
@@ -109,6 +112,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
 class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with WindowListener {
   late final VideoEngine _engine;
+  late final Widget _videoSurface;
   late HistoryStorage _historyStorage;
   late PlayerSettingsStorage _playerSettings;
 
@@ -119,16 +123,40 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _isFullscreen = false;
   Timer? _hideTimer;
 
-  // TV 焦点管理
-  // _rootFocusNode：外层 Focus 的节点，控制栏隐藏时焦点回落到它，
-  // 从而让外层 _handleKey 接管方向键
-  final FocusNode _rootFocusNode = FocusNode(debugLabel: 'playerRoot');
-  // _playPauseFocusNode：播放/暂停按钮的节点，显示控制栏时 TV 上自动聚焦到它
-  final FocusNode _playPauseFocusNode = FocusNode(debugLabel: 'playPause');
+  final _rootFocusNode = FocusNode(debugLabel: 'playerRoot');
+  final _progressFocusNode = FocusNode(debugLabel: 'playerProgress');
+  final _backFocusNode = FocusNode(debugLabel: 'playerBack');
+  final Map<String, FocusNode> _actionNodes = {};
+  final Map<String, FocusNode> _errorNodes = {};
+  String _lastAction = 'playPause';
+  Duration? _seekPreview;
+  LogicalKeyboardKey? _seekKey;
+  int _seekRepeatCount = 0;
+  _PlayerPanel? _panel;
+  _PlayerPanel? _panelParent;
+  FocusNode? _panelOrigin;
+  bool _allowExit = false;
+  int _settingsPanelIndex = 0;
 
-  // 快进/快退长按加速
-  Timer? _seekHoldTimer;
-  int _seekHoldCount = 0; // 已触发次数，用于计算加速档位
+  void _update(VoidCallback update) => setState(update);
+
+  FocusNode _actionNode(String id) =>
+      _actionNodes.putIfAbsent(id, () => FocusNode(debugLabel: 'player:$id'));
+  FocusNode _errorNode(String id) => _errorNodes.putIfAbsent(
+    id,
+    () => FocusNode(debugLabel: 'playerError:$id'),
+  );
+
+  List<String> get _actionIds => [
+    'playPause',
+    if (_hasPrev) 'previous',
+    if (_hasNext) 'next',
+    if (widget.episodeGroups[_groupIndex].length > 1) 'episodes',
+    if (widget.episodeGroups.where((group) => group.isNotEmpty).length > 1)
+      'sources',
+    'settings',
+    if (!PlatformService.isTv) 'fullscreen',
+  ];
 
   // 播放器状态
   Duration _position = Duration.zero;
@@ -203,6 +231,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _engine = ref.read(videoEngineFactoryProvider)(
       hardwareDecode: _playerSettings.hardwareDecode,
     );
+    _videoSurface = RepaintBoundary(child: _engine.buildVideoView());
 
     // 应用默认倍速
     _playbackSpeed = _playerSettings.defaultSpeed;
@@ -242,6 +271,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _playSub = _engine.playingStream.listen((p) {
       if (!mounted) return;
       setState(() => _playing = p);
+      if (p) {
+        _scheduleHide();
+      } else {
+        _showControls();
+      }
       // playing=true 可能早于首帧，首帧确认统一由 position 连续推进完成。
     });
     _qualitiesSub = _engine.qualitiesStream.listen((list) {
@@ -277,7 +311,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (!mounted || err.isEmpty) return;
       // 自动尝试下一线路（仅多线路时触发）
       if (widget.episodeGroups.length > 1) {
-        final nextGroup = _groupIndex + 1;
+        var nextGroup = _groupIndex + 1;
+        while (nextGroup < widget.episodeGroups.length &&
+            widget.episodeGroups[nextGroup].isEmpty) {
+          nextGroup++;
+        }
         if (nextGroup < widget.episodeGroups.length) {
           final nextEps = widget.episodeGroups[nextGroup];
           final epIdx = _episodeIndex.clamp(0, nextEps.length - 1);
@@ -305,7 +343,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _errorTimer?.cancel();
       _errorTimer = Timer(const Duration(milliseconds: 1500), () {
         if (mounted && (_progressEvidence.isArmed || !_playing)) {
-          setState(() => _error = errorMsg);
+          _setError(errorMsg);
         }
       });
     });
@@ -321,6 +359,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _buffStartAt = DateTime.now();
     _playCurrentEpisode();
     _scheduleHide();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _error == null) _actionNode('playPause').requestFocus();
+    });
 
     // 播放期间保持屏幕常亮：酷开等 Android TV ROM 屏保触发后会杀掉前台 App
     WakelockPlus.enable();
@@ -355,7 +396,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     WakelockPlus.disable();
     unawaited(PlatformService.setKeepScreenOn(false));
     _hideTimer?.cancel();
-    _seekHoldTimer?.cancel();
     _errorTimer?.cancel();
     _stuckTimer?.cancel();
     _buffTickTimer?.cancel();
@@ -373,7 +413,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _progressState.dispose();
     _loadingState.dispose();
     _rootFocusNode.dispose();
-    _playPauseFocusNode.dispose();
+    _progressFocusNode.dispose();
+    _backFocusNode.dispose();
+    for (final node in [..._actionNodes.values, ..._errorNodes.values]) {
+      node.dispose();
+    }
     if (_isDesktopPlatform) windowManager.removeListener(this);
     if (PlatformService.isTv) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -395,8 +439,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       defaultTargetPlatform == TargetPlatform.macOS ||
       defaultTargetPlatform == TargetPlatform.windows ||
       defaultTargetPlatform == TargetPlatform.linux;
-
-  bool get _usesLeanbackControls => PlatformService.isTv || _isDesktopPlatform;
 
   // ── WindowListener（桌面端全屏状态同步） ──
 
@@ -469,6 +511,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (changed) _bufferMetrics.onBufferingChanged(value, now);
 
     if (value) {
+      _hideTimer?.cancel();
       if (restartIndicators) {
         _buffStartAt = now;
         _speedBps = null;
@@ -489,6 +532,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _speedMonitor.stop();
     }
     _publishLoadingState();
+    if (!value) _scheduleHide();
   }
 
   /// position 首次到达预期位置只作为基线；随后播放时钟继续推进，才算首帧
@@ -504,7 +548,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _publishLoadingState();
     _bufferMetrics.markFirstFrame(DateTime.now());
     _errorTimer?.cancel();
-    if (_error != null && mounted) setState(() => _error = null);
+    if (_error != null && mounted) {
+      setState(() => _error = null);
+      _restoreControlsFocus();
+    }
+    _scheduleHide();
   }
 
   void _expectRecoveryAt(Duration position) {
@@ -525,7 +573,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _stuckTimer = Timer(timeout, () {
       if (!mounted) return;
       if (_progressEvidence.isArmed && _error == null) {
-        setState(() => _error = _stuckMessage);
+        _setError(_stuckMessage);
       }
     });
   }
@@ -539,6 +587,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _playCurrentEpisode() async {
     final requestId = ++_playRequestId;
+    _seekPreview = null;
+    _seekKey = null;
+    _seeking = false;
     final episode = _current;
     var url = episode.url;
     var headers = episode.headers;
@@ -577,7 +628,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (!mounted || requestId != _playRequestId) return;
       _disarmStuckTimer();
       _setBuffering(false);
-      setState(() => _error = '播放地址解析失败：$error');
+      _setError('播放地址解析失败：$error');
     }
   }
 
@@ -587,20 +638,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _switchEpisode(int groupIndex, int episodeIndex) {
+    _saveHistory();
+    _resumePositionMs = 0;
     setState(() {
       _groupIndex = groupIndex;
       _episodeIndex = episodeIndex;
     });
     _playCurrentEpisode();
-    _showControls();
-  }
-
-  void _seekRelative(Duration delta) {
-    final ms = (_position + delta).inMilliseconds.clamp(
-      0,
-      _duration.inMilliseconds,
-    );
-    _seekTo(Duration(milliseconds: ms));
     _showControls();
   }
 
@@ -634,65 +678,51 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     } catch (error) {
       if (!mounted) return;
       _disarmStuckTimer();
-      setState(() => _error = '切换画质失败：$error');
+      _setError('切换画质失败：$error');
     }
   }
 
-  // ── 快进/快退长按加速 ──
+  // ── 控件、进度预览与面板 ──
 
-  /// 按住时每次 seek 的秒数：按得越久档位越高
-  /// 间隔 150ms，档位：0~3次 10s → 4~12次 30s → 13次+ 60s
-  int _seekSeconds() {
-    if (_seekHoldCount < 4) return 10; // 0~0.45s : ±10s
-    if (_seekHoldCount < 13) return 30; // 0.6~1.8s: ±30s
-    return 60; // 1.95s+  : ±60s
+  void _restoreControlsFocus([FocusNode? node]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _panel != null) return;
+      if (_error != null) {
+        _errorNode('retry').requestFocus();
+      } else if (_controlsVisible) {
+        final target = node;
+        if (target != null &&
+            target.context != null &&
+            target.canRequestFocus) {
+          target.requestFocus();
+        } else {
+          _actionNode('playPause').requestFocus();
+        }
+      }
+    });
   }
 
-  /// 按下时调用：立即 seek 一次，然后以 150ms 间隔持续加速 seek
-  void _startSeekHold(bool forward) {
-    _stopSeekHold();
-    _seekHoldCount = 0;
-
-    void doSeek() {
-      _seekRelative(
-        Duration(seconds: forward ? _seekSeconds() : -_seekSeconds()),
-      );
-      _seekHoldCount++;
-    }
-
-    doSeek(); // 按下立即响应
-    _seekHoldTimer = Timer.periodic(
-      const Duration(milliseconds: 150),
-      (_) => doSeek(),
-    );
+  void _setError(String message) {
+    _hideTimer?.cancel();
+    setState(() {
+      _error = message;
+      _seekPreview = null;
+      _seekKey = null;
+      _seeking = false;
+      _controlsVisible = true;
+    });
+    _restoreControlsFocus();
   }
 
-  /// 松开时调用：停止加速计时器
-  void _stopSeekHold() {
-    _seekHoldTimer?.cancel();
-    _seekHoldTimer = null;
-    _seekHoldCount = 0;
-  }
-
-  // ── 控制栏显示 / 隐藏 ──
-
-  void _showControls() {
-    _scheduleHide();
+  void _showControls({bool focus = false}) {
     final wasHidden = !_controlsVisible;
     if (wasHidden) setState(() => _controlsVisible = true);
-    // TV 下：控制栏从隐藏变可见时，把焦点移到播放按钮，
-    // 这样用户按方向键可在控制栏内自由导航
-    if (wasHidden && PlatformService.isTv) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _controlsVisible) {
-          _playPauseFocusNode.requestFocus();
-        }
-      });
-    }
+    if (wasHidden || focus) _restoreControlsFocus();
+    _scheduleHide();
   }
 
-  /// 点击视频区域：切换控制栏显示/隐藏
   void _toggleControls() {
+    if (_panel != null || _error != null || _seekPreview != null) return;
     if (_controlsVisible) {
       _hideControls();
     } else {
@@ -700,31 +730,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
-  /// 隐藏控制栏，并把焦点交还给外层（TV）
   void _hideControls() {
+    if (_panel != null || _seekPreview != null || _error != null) return;
     _hideTimer?.cancel();
     if (_controlsVisible) setState(() => _controlsVisible = false);
-    if (PlatformService.isTv) _rootFocusNode.requestFocus();
+    _rootFocusNode.requestFocus();
   }
 
   void _scheduleHide() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
+    if (!_playing ||
+        _buffering ||
+        _progressEvidence.isArmed ||
+        _panel != null ||
+        _seekPreview != null ||
+        _error != null) {
+      return;
+    }
+    _hideTimer = Timer(const Duration(seconds: 5), () {
       if (mounted) _hideControls();
     });
   }
 
-  /// 鼠标移出播放器区域时快速隐藏（桌面端）
-  void _onMouseExit(PointerExitEvent _) {
-    _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(milliseconds: 400), () {
-      if (mounted) _hideControls();
-    });
-  }
-
-  // ── 鼠标滚轮调节音量 ──
+  void _onMouseExit(PointerExitEvent _) => _scheduleHide();
 
   void _onPointerSignal(PointerSignalEvent event) {
+    if (_panel != null) return;
     if (event is PointerScrollEvent) {
       final delta = event.scrollDelta.dy > 0 ? -0.05 : 0.05;
       setState(() => _volume = (_volume + delta).clamp(0.0, 1.0));
@@ -733,425 +764,93 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
-  // ── 右键菜单（桌面端） ──
+  void _previewSeek(bool forward, {bool repeat = false}) {
+    if (_duration <= Duration.zero) return;
+    final key = forward
+        ? LogicalKeyboardKey.arrowRight
+        : LogicalKeyboardKey.arrowLeft;
+    // 取消预览后忽略仍然按住的方向键重复事件，直到下一次重新按下。
+    if (repeat && _seekKey != key) return;
+    _seekKey = key;
+    if (!repeat) _seekRepeatCount = 0;
+    final step = _seekRepeatCount < 8
+        ? 10
+        : _seekRepeatCount < 20
+        ? 30
+        : 60;
+    _seekRepeatCount++;
+    final target =
+        ((_seekPreview ?? _position).inMilliseconds +
+                (forward ? step : -step) * 1000)
+            .clamp(0, _duration.inMilliseconds);
+    _hideTimer?.cancel();
+    setState(() {
+      _controlsVisible = true;
+      _seekPreview = Duration(milliseconds: target);
+    });
+    _restoreControlsFocus(_progressFocusNode);
+  }
 
-  void _showContextMenu(TapUpDetails details) {
-    final position = details.globalPosition;
-    showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx,
-        position.dy,
-      ),
-      color: AppColors.surface,
-      items: [
-        // 倍速子菜单
-        PopupMenuItem(
-          value: 'speed',
-          child: PopupMenuButton<double>(
-            offset: const Offset(-160, 0),
-            color: AppColors.surface,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.speed,
-                  color: AppColors.secondaryText,
-                  size: 18,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '倍速 ${_playbackSpeed}x',
-                  style: const TextStyle(color: AppColors.primaryText),
-                ),
-              ],
-            ),
-            itemBuilder: (_) => [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-                .map(
-                  (s) => PopupMenuItem(
-                    value: s,
-                    child: Text(
-                      '${s}x',
-                      style: TextStyle(
-                        color: s == _playbackSpeed
-                            ? AppColors.netflixRed
-                            : AppColors.primaryText,
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
-            onSelected: (speed) {
-              setState(() => _playbackSpeed = speed);
-              _engine.setRate(speed);
-            },
-          ),
-        ),
-        // 画质切换（HLS 多码率时）
-        if (_qualities.length > 1)
-          PopupMenuItem(
-            value: 'quality',
-            child: Row(
-              children: [
-                const Icon(Icons.hd, color: AppColors.secondaryText, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  '画质 ${_currentQuality.isAuto ? '自动' : '${_currentQuality.height ?? '?'}P'}',
-                  style: const TextStyle(color: AppColors.primaryText),
-                ),
-              ],
-            ),
-          ),
-        // 线路切换
-        if (widget.episodeGroups.length > 1)
-          ...List.generate(widget.episodeGroups.length, (i) {
-            final name = widget.sourceNames.length > i
-                ? widget.sourceNames[i]
-                : '线路 ${i + 1}';
-            return PopupMenuItem(
-              value: 'source_$i',
-              child: Row(
-                children: [
-                  Icon(
-                    i == _groupIndex ? Icons.check : Icons.swap_horiz,
-                    color: i == _groupIndex
-                        ? AppColors.netflixRed
-                        : AppColors.secondaryText,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    name,
-                    style: TextStyle(
-                      color: i == _groupIndex
-                          ? AppColors.netflixRed
-                          : AppColors.primaryText,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-      ],
-    ).then((value) {
-      if (value == null) return;
-      if (value == 'quality' && _qualities.length > 1) {
-        // 从右键菜单打开画质选择对话框
-        _showQualityPicker();
-      } else if (value.startsWith('source_')) {
-        final idx = int.parse(value.substring(7));
-        if (idx != _groupIndex) {
-          _switchEpisode(
-            idx,
-            _episodeIndex.clamp(0, widget.episodeGroups[idx].length - 1),
-          );
-        }
-      }
+  void _finishSeek({required bool commit}) {
+    final target = _seekPreview;
+    setState(() {
+      _seekPreview = null;
+      _seekKey = null;
+      _seekRepeatCount = 0;
+      _seeking = false;
+    });
+    if (commit && target != null) {
+      _position = target;
+      _publishProgressState();
+      _seekTo(target);
+    }
+    _scheduleHide();
+  }
+
+  void _openPanel(_PlayerPanel panel) {
+    if (_seekPreview != null) _finishSeek(commit: false);
+    _hideTimer?.cancel();
+    if (_panel == null) _panelOrigin = FocusManager.instance.primaryFocus;
+    setState(() {
+      _panelParent = _panel == _PlayerPanel.settings ? _panel : null;
+      _panel = panel;
+      _controlsVisible = true;
     });
   }
 
-  // ── 画质选择对话框（右键菜单触发） ──
-
-  void _showQualityPicker() {
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('画质切换', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _PickerTile(
-                title: '自动',
-                selected: _currentQuality.isAuto,
-                autofocus: _currentQuality.isAuto,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _selectQuality(const VideoQuality.auto());
-                },
-              ),
-              ..._qualities.map((q) {
-                final selected = q.id == _currentQuality.id;
-                return _PickerTile(
-                  title: _qualityLabel(q),
-                  subtitle: '${q.width}×${q.height}',
-                  selected: selected,
-                  autofocus: selected,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _selectQuality(q);
-                  },
-                );
-              }),
-            ],
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
+  void _closePanel() {
+    setState(() {
+      _panel = _panelParent;
+      _panelParent = null;
+    });
+    if (_panel == null) {
+      _restoreControlsFocus(_panelOrigin);
+      _scheduleHide();
+    }
   }
 
-  void _trackDialog(Future<void> dialog, {VoidCallback? onComplete}) {
-    dialog.whenComplete(() => onComplete?.call());
-  }
-
-  void _showPlaybackOptionsPanel() {
+  void _exitPlayer() {
     _hideTimer?.cancel();
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => Dialog(
-          alignment: Alignment.bottomCenter,
-          backgroundColor: const Color(0xFF151515),
-          insetPadding: const EdgeInsets.fromLTRB(56, 0, 56, 44),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 880),
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('播放选项', style: AppTypography.headline2),
-                      ),
-                      Text(
-                        _sourceName,
-                        style: AppTypography.body.copyWith(
-                          color: Colors.white54,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    spacing: AppSpacing.md,
-                    runSpacing: AppSpacing.md,
-                    children: [
-                      _OptionTile(
-                        icon: Icons.video_library,
-                        title: '选集',
-                        subtitle: _current.name,
-                        autofocus: true,
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          _showTvEpisodePicker();
-                        },
-                      ),
-                      if (widget.episodeGroups.length > 1)
-                        _OptionTile(
-                          icon: Icons.swap_horiz,
-                          title: '线路',
-                          subtitle: _sourceName,
-                          onTap: () {
-                            Navigator.of(context).pop();
-                            _showTvSourcePicker();
-                          },
-                        ),
-                      if (_qualities.length > 1)
-                        _OptionTile(
-                          icon: Icons.hd,
-                          title: '画质',
-                          subtitle: _currentQuality.isAuto
-                              ? '自动'
-                              : _qualityLabel(_currentQuality),
-                          onTap: () {
-                            Navigator.of(context).pop();
-                            _showTvQualityPicker();
-                          },
-                        ),
-                      _OptionTile(
-                        icon: Icons.speed,
-                        title: '倍速',
-                        subtitle: _speedLabel(_playbackSpeed),
-                        onTap: () {
-                          Navigator.of(context).pop();
-                          _showTvSpeedPicker();
-                        },
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
+    setState(() => _allowExit = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && context.canPop()) context.pop();
+    });
   }
 
-  void _showTvEpisodePicker() {
-    final episodes = widget.episodeGroups[_groupIndex];
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: Text(_sourceName, style: const TextStyle(color: Colors.white)),
-          content: SizedBox(
-            width: 460,
-            height: episodes.length > 8 ? 480 : null,
-            child: ListView.builder(
-              shrinkWrap: episodes.length <= 8,
-              itemCount: episodes.length,
-              itemBuilder: (_, i) {
-                final selected = i == _episodeIndex;
-                return _PickerTile(
-                  title: episodes[i].name,
-                  selected: selected,
-                  autofocus: selected,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    if (i != _episodeIndex) _switchEpisode(_groupIndex, i);
-                  },
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
-  }
-
-  void _showTvSourcePicker() {
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('切换线路', style: TextStyle(color: Colors.white)),
-          content: SizedBox(
-            width: 420,
-            height: widget.episodeGroups.length > 8 ? 440 : null,
-            child: ListView.builder(
-              shrinkWrap: widget.episodeGroups.length <= 8,
-              itemCount: widget.episodeGroups.length,
-              itemBuilder: (_, i) {
-                final selected = i == _groupIndex;
-                final name = widget.sourceNames.length > i
-                    ? widget.sourceNames[i]
-                    : '线路 ${i + 1}';
-                return _PickerTile(
-                  title: name,
-                  selected: selected,
-                  autofocus: selected,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    if (i != _groupIndex) {
-                      _switchEpisode(
-                        i,
-                        _episodeIndex.clamp(
-                          0,
-                          widget.episodeGroups[i].length - 1,
-                        ),
-                      );
-                    }
-                  },
-                );
-              },
-            ),
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
-  }
-
-  void _showTvQualityPicker() {
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('画质', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _PickerTile(
-                title: '自动',
-                selected: _currentQuality.isAuto,
-                autofocus: _currentQuality.isAuto,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _selectQuality(const VideoQuality.auto());
-                },
-              ),
-              ..._qualities.map((q) {
-                final selected = q.id == _currentQuality.id;
-                return _PickerTile(
-                  title: _qualityLabel(q),
-                  subtitle: '${q.width}×${q.height}',
-                  selected: selected,
-                  autofocus: selected,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _selectQuality(q);
-                  },
-                );
-              }),
-            ],
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
-  }
-
-  void _showTvSpeedPicker() {
-    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    _trackDialog(
-      showDialog<void>(
-        context: context,
-        barrierColor: Colors.black54,
-        builder: (_) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text('倍速', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: speeds.map((s) {
-              final selected = s == _playbackSpeed;
-              return _PickerTile(
-                title: _speedLabel(s),
-                selected: selected,
-                autofocus: selected,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  setState(() => _playbackSpeed = s);
-                  _engine.setRate(s);
-                },
-              );
-            }).toList(),
-          ),
-        ),
-      ),
-      onComplete: () {
-        if (mounted) _scheduleHide();
-      },
-    );
+  void _handleBack() {
+    if (_panel != null) {
+      _closePanel();
+    } else if (_seekPreview != null) {
+      _finishSeek(commit: false);
+    } else if (_error != null) {
+      _exitPlayer();
+    } else if (_controlsVisible) {
+      _hideControls();
+    } else if (_isFullscreen && !PlatformService.isTv) {
+      _toggleFullscreen();
+    } else {
+      _exitPlayer();
+    }
   }
 
   static String _qualityLabel(VideoQuality q) {
@@ -1193,771 +892,244 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // ── 键盘 / 遥控器事件 ──
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (PlatformService.isTv) return _handleTvKey(event);
-
-    // 松开方向键时停止加速（只影响外层自己启动的 hold）
-    if (event is KeyUpEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
-          event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _stopSeekHold();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    }
-
-    // 仅处理 KeyDownEvent；KeyRepeatEvent 由 _seekHoldTimer 自主控制频率
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-    if (_isPlayPauseKey(event.logicalKey)) {
-      _showControls();
-      _engine.playOrPause();
-      return KeyEventResult.handled;
-    }
-
-    // 全局快捷键：无论控制栏是否可见、焦点在哪里，都处理
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.escape:
-        _stopSeekHold();
-        // 全屏中按 ESC：先退出全屏，不返回上一页
-        if (_isFullscreen) {
-          _toggleFullscreen();
-        } else {
-          context.pop();
-        }
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.goBack:
-        _stopSeekHold();
-        // TV：有控制栏时先隐藏，再按才退出；更符合遥控器使用习惯
-        if (PlatformService.isTv && _controlsVisible) {
-          _hideControls();
-        } else {
-          context.pop();
-        }
-        return KeyEventResult.handled;
-    }
-
-    // 非 TV（桌面键盘 / 手机外接键盘）：保留全局播放快捷键，同时允许桌面模拟 TV 面板
-    switch (event.logicalKey) {
-      case LogicalKeyboardKey.arrowLeft:
-        _startSeekHold(false);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowRight:
-        _startSeekHold(true);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowUp:
-      case LogicalKeyboardKey.contextMenu:
-        _showControls();
-        _showPlaybackOptionsPanel();
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowDown:
-        if (_usesLeanbackControls) {
-          if (_controlsVisible) {
-            _hideControls();
-          } else {
-            _showControls();
-          }
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      case LogicalKeyboardKey.keyM:
-        _showControls();
-        _showPlaybackOptionsPanel();
-        return KeyEventResult.handled;
-      default:
-        return KeyEventResult.ignored;
-    }
-  }
-
-  KeyEventResult _handleTvKey(KeyEvent event) {
     final key = event.logicalKey;
-
-    if (_error != null) {
-      _stopSeekHold();
-      if (event is KeyDownEvent &&
-          (key == LogicalKeyboardKey.goBack ||
-              key == LogicalKeyboardKey.escape)) {
-        context.pop();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    }
-
     if (event is KeyUpEvent) {
-      if (key == LogicalKeyboardKey.arrowLeft ||
-          key == LogicalKeyboardKey.arrowRight) {
-        _stopSeekHold();
+      if (key == _seekKey) {
+        _finishSeek(commit: _panel == null && _error == null);
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
     }
-
-    if (event is KeyRepeatEvent) {
-      if (key == LogicalKeyboardKey.arrowLeft ||
-          key == LogicalKeyboardKey.arrowRight ||
-          _isPlayPauseKey(key)) {
-        return KeyEventResult.handled;
-      }
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-    if (_isPlayPauseKey(key)) {
-      _engine.playOrPause();
-      _showControls();
+    if (_isBackKey(key)) {
+      if (event is KeyDownEvent) _handleBack();
       return KeyEventResult.handled;
     }
-
-    switch (key) {
-      case LogicalKeyboardKey.arrowLeft:
-        _startSeekHold(false);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowRight:
-        _startSeekHold(true);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowUp:
-      case LogicalKeyboardKey.contextMenu:
-        _showControls();
-        _showPlaybackOptionsPanel();
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.arrowDown:
-        if (_controlsVisible) {
-          _hideControls();
-        } else {
-          _showControls();
-        }
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.escape:
-      case LogicalKeyboardKey.goBack:
-        _stopSeekHold();
-        if (_controlsVisible) {
-          _hideControls();
-        } else {
-          context.pop();
-        }
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.mediaTrackPrevious:
-        if (_hasPrev) _switchEpisode(_groupIndex, _episodeIndex - 1);
-        return KeyEventResult.handled;
-      case LogicalKeyboardKey.mediaTrackNext:
-        if (_hasNext) _switchEpisode(_groupIndex, _episodeIndex + 1);
-        return KeyEventResult.handled;
-      default:
-        _showControls();
-        return KeyEventResult.handled;
+    // 面板内部拥有自己的方向键与确认键；父级不得触发播放快捷键。
+    if (_panel != null) return KeyEventResult.ignored;
+    if (_error != null) {
+      final ids = [
+        'retry',
+        if (_actionIds.contains('sources')) 'sources',
+        'back',
+      ];
+      final current = ids.indexWhere((id) => _errorNode(id).hasFocus);
+      if (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowUp) {
+        _errorNode(ids[(current - 1).clamp(0, ids.length - 1)]).requestFocus();
+      } else if (key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.arrowDown) {
+        _errorNode(ids[(current + 1).clamp(0, ids.length - 1)]).requestFocus();
+      }
+      return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
+      if (event is KeyDownEvent) {
+        _engine.playOrPause();
+        _showControls();
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.mediaTrackNext ||
+        key == LogicalKeyboardKey.mediaTrackPrevious) {
+      if (event is KeyDownEvent) {
+        if (key == LogicalKeyboardKey.mediaTrackNext && _hasNext) {
+          _switchEpisode(_groupIndex, _episodeIndex + 1);
+        }
+        if (key == LogicalKeyboardKey.mediaTrackPrevious && _hasPrev) {
+          _switchEpisode(_groupIndex, _episodeIndex - 1);
+        }
+        _restoreControlsFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.contextMenu ||
+        key == LogicalKeyboardKey.keyM) {
+      if (event is KeyDownEvent) _openPanel(_PlayerPanel.settings);
+      return KeyEventResult.handled;
+    }
+    final horizontal =
+        key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight;
+    final vertical =
+        key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown;
+    if (!_controlsVisible) {
+      if (horizontal) {
+        _previewSeek(
+          key == LogicalKeyboardKey.arrowRight,
+          repeat: event is KeyRepeatEvent,
+        );
+      } else if (vertical || _isConfirmKey(key)) {
+        _showControls(focus: true);
+      }
+      return horizontal || vertical || _isConfirmKey(key)
+          ? KeyEventResult.handled
+          : KeyEventResult.ignored;
+    }
+    if (_progressFocusNode.hasFocus) {
+      if (horizontal) {
+        _previewSeek(
+          key == LogicalKeyboardKey.arrowRight,
+          repeat: event is KeyRepeatEvent,
+        );
+      } else if (_isConfirmKey(key)) {
+        if (event is KeyDownEvent && _seekPreview == null) {
+          _actionNode(
+            _actionIds.contains(_lastAction) ? _lastAction : 'playPause',
+          ).requestFocus();
+        }
+      } else if (vertical) {
+        // 离开时间轴取消预览，避免随后松开方向键时误跳转。
+        if (_seekPreview != null) _finishSeek(commit: false);
+        if (key == LogicalKeyboardKey.arrowUp) {
+          _backFocusNode.requestFocus();
+        } else {
+          _actionNode(
+            _actionIds.contains(_lastAction) ? _lastAction : 'playPause',
+          ).requestFocus();
+        }
+      }
+    } else if (_backFocusNode.hasFocus) {
+      if (vertical) _progressFocusNode.requestFocus();
+    } else {
+      final ids = _actionIds;
+      final index = ids.indexWhere((id) => _actionNode(id).hasFocus);
+      if (horizontal) {
+        final next = (index + (key == LogicalKeyboardKey.arrowRight ? 1 : -1))
+            .clamp(0, ids.length - 1);
+        _actionNode(ids[next]).requestFocus();
+      } else if (key == LogicalKeyboardKey.arrowUp) {
+        _progressFocusNode.requestFocus();
+      } else if (_isConfirmKey(key) && event is KeyDownEvent) {
+        _actionNode('playPause').requestFocus();
+      }
+    }
+    _scheduleHide();
+    return horizontal || vertical || _isConfirmKey(key)
+        ? KeyEventResult.handled
+        : KeyEventResult.ignored;
   }
 
   // ── Build ──
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Focus(
-        focusNode: _rootFocusNode,
-        autofocus: true,
-        onKeyEvent: _handleKey,
-        child: Listener(
-          // 鼠标滚轮调节音量
-          onPointerSignal: _onPointerSignal,
-          child: MouseRegion(
-            // 桌面：鼠标移入/移动显示控制栏，移出快速隐藏
-            // TV：MouseRegion 无鼠标事件，键盘逻辑不受影响
-            onEnter: (_) => _showControls(),
-            onHover: (_) => _showControls(),
-            onExit: _onMouseExit,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: _toggleControls,
-              onSecondaryTapUp: _isDesktopPlatform ? _showContextMenu : null,
-              child: Stack(
-                // 加载层移除后只剩 SizedBox.shrink；必须固定为可用区域，
-                // 否则 Stack 会缩成 0×0，连同视频与控制栏一起消失。
-                fit: StackFit.expand,
-                children: [
-                  // 全屏视频（禁用内置控件，使用自定义控制栏）
-                  Positioned.fill(child: _engine.buildVideoView()),
-
-                  // 加载状态局部刷新，网速/计时不会再重建视频视图和整页控件。
-                  ValueListenableBuilder<_LoadingUiState>(
-                    valueListenable: _loadingState,
-                    builder: (context, loading, _) {
-                      if (loading.isInitialLoading) {
-                        return _LoadingOverlay(
-                          title: widget.videoTitle,
-                          episodeName: _current.name,
-                          sourceName: '${widget.site.name} · $_sourceName',
-                          bufferingSeconds: loading.waitingSeconds,
-                          speedBps: loading.appRxBytesPerSecond,
-                        );
-                      }
-                      if (loading.isRebuffering) {
-                        return _RebufferIndicator(
-                          bufferingSeconds: loading.waitingSeconds,
-                          speedBps: loading.appRxBytesPerSecond,
-                        );
-                      }
-                      return const SizedBox.shrink();
-                    },
-                  ),
-
-                  // 播放失败遮罩
-                  if (_error != null)
-                    _ErrorOverlay(
-                      message: _error!,
-                      sourceName: _sourceName,
-                      onRetry: () {
-                        setState(() => _error = null);
-                        _playCurrentEpisode();
-                      },
-                      onBack: () => context.pop(),
-                      // 多线路时提供手动切换
-                      onSwitchSource: widget.episodeGroups.length > 1
-                          ? () {
-                              final next =
-                                  (_groupIndex + 1) %
-                                  widget.episodeGroups.length;
-                              final epIdx = _episodeIndex.clamp(
-                                0,
-                                widget.episodeGroups[next].length - 1,
-                              );
-                              setState(() {
-                                _groupIndex = next;
-                                _episodeIndex = epIdx;
-                                _error = null;
-                              });
-                              _playCurrentEpisode();
-                            }
-                          : null,
+    final showControls = _controlsVisible && _error == null && _panel == null;
+    return PopScope(
+      canPop:
+          _allowExit ||
+          (_panel == null &&
+              _seekPreview == null &&
+              !_controlsVisible &&
+              !_isFullscreen),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          focusNode: _rootFocusNode,
+          autofocus: true,
+          onKeyEvent: _handleKey,
+          child: Listener(
+            onPointerSignal: _onPointerSignal,
+            child: MouseRegion(
+              onEnter: (_) => _showControls(),
+              onHover: (_) => _showControls(),
+              onExit: _onMouseExit,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleControls,
+                onSecondaryTapUp: _isDesktopPlatform
+                    ? (_) => _openPanel(_PlayerPanel.settings)
+                    : null,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned.fill(child: _videoSurface),
+                    IgnorePointer(
+                      child: ValueListenableBuilder<_LoadingUiState>(
+                        valueListenable: _loadingState,
+                        builder: (context, loading, _) {
+                          if (loading.isInitialLoading) {
+                            return _LoadingOverlay(
+                              title: widget.videoTitle,
+                              episodeName: _current.name,
+                              sourceName: '${widget.site.name} · $_sourceName',
+                              bufferingSeconds: loading.waitingSeconds,
+                              speedBps: loading.appRxBytesPerSecond,
+                            );
+                          }
+                          if (loading.isRebuffering) {
+                            return _RebufferIndicator(
+                              bufferingSeconds: loading.waitingSeconds,
+                              speedBps: loading.appRxBytesPerSecond,
+                            );
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
                     ),
-
-                  // 返回按钮（左上角）
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    child: AnimatedOpacity(
-                      opacity: _controlsVisible ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 200),
+                    ExcludeFocus(
+                      excluding: !showControls,
                       child: IgnorePointer(
-                        ignoring: !_controlsVisible,
-                        child: ExcludeFocus(
-                          excluding: !_controlsVisible,
-                          child: SafeArea(
-                            child: Padding(
-                              padding: const EdgeInsets.all(AppSpacing.sm),
-                              child: _FocusableRow(
-                                padding: const EdgeInsets.all(AppSpacing.sm),
-                                borderRadius: const BorderRadius.all(
-                                  Radius.circular(24),
-                                ),
-                                onActivate: () => context.pop(),
-                                child: const Icon(
-                                  Icons.arrow_back,
-                                  color: Colors.white,
-                                  size: 28,
+                        ignoring: !showControls,
+                        child: AnimatedOpacity(
+                          opacity: showControls ? 1 : 0,
+                          duration: const Duration(milliseconds: 180),
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                top: 0,
+                                left: 0,
+                                child: SafeArea(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      MediaQuery.sizeOf(context).width >= 1000
+                                          ? 40
+                                          : 16,
+                                    ),
+                                    child: _PlayerButton(
+                                      focusNode: _backFocusNode,
+                                      icon: Icons.arrow_back,
+                                      label: '退出播放',
+                                      onTap: _exitPlayer,
+                                      onFocused: _scheduleHide,
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: _scheduleHide,
+                                  child: _buildControlBar(),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-
-                  // 控制栏（底部）：Positioned 必须是 Stack 直接子级
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: AnimatedOpacity(
-                      opacity: _controlsVisible ? 1.0 : 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: IgnorePointer(
-                        ignoring: !_controlsVisible,
-                        // ExcludeFocus：控制栏隐藏时剥夺内部焦点，焦点自然回到外层
-                        // _rootFocusNode，TV 用户下一次按键会先拉起控制栏
-                        child: ExcludeFocus(
-                          excluding: !_controlsVisible,
-                          // 包一层空 onTap 吃掉控制栏区域的 tap，防止冒泡到外层
-                          // _toggleControls —— 点击控制栏空隙不该隐藏控制栏；同时
-                          // 避免手机端外层 Tap 手势抢占 Slider 的 tap-to-seek。
-                          // 子组件（按钮、Slider）的手势识别器仍优先胜出（deepest wins）。
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              // 点击控制栏时重置自动隐藏计时器，保持可见
-                              _showControls();
-                            },
-                            child: _buildControlBar(),
-                          ),
-                        ),
+                    if (_error != null)
+                      ExcludeFocus(
+                        excluding: _panel != null,
+                        child: _buildError(),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControlBar() {
-    if (_usesLeanbackControls) return _buildLeanbackControlBar();
-
-    final isMobile = PlatformService.isMobile;
-    final hPad = isMobile ? AppSpacing.md : AppSpacing.xl;
-    final btnGap = isMobile ? AppSpacing.lg : AppSpacing.xl;
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Colors.black87],
-        ),
-      ),
-      padding: EdgeInsets.fromLTRB(hPad, AppSpacing.lg, hPad, AppSpacing.md),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 标题行：倍速 / 音量 / 画质 / 线路 / 全屏 全部归拢到这里
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${widget.videoTitle}  ${_current.name} · ${widget.site.name}',
-                  style: AppTypography.caption,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              // 倍速选择器（始终显示）
-              _SpeedSelector(
-                currentSpeed: _playbackSpeed,
-                onSelect: (s) {
-                  setState(() => _playbackSpeed = s);
-                  _engine.setRate(s);
-                  _showControls();
-                },
-              ),
-              const SizedBox(width: AppSpacing.md),
-              // 音量提示（桌面端）
-              if (_isDesktopPlatform)
-                Padding(
-                  padding: const EdgeInsets.only(right: AppSpacing.md),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _volume == 0
-                            ? Icons.volume_off
-                            : _volume < 0.5
-                            ? Icons.volume_down
-                            : Icons.volume_up,
-                        color: Colors.white70,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${(_volume * 100).round()}%',
-                        style: AppTypography.caption,
-                      ),
-                    ],
-                  ),
-                ),
-              // 画质切换（HLS 多码率时显示）
-              if (_qualities.length > 1) ...[
-                _QualitySelector(
-                  qualities: _qualities,
-                  currentQuality: _currentQuality,
-                  onSelect: (q) {
-                    _selectQuality(q);
-                  },
-                ),
-                const SizedBox(width: AppSpacing.md),
-              ],
-              // 多线路时显示可切换的线路选择器
-              if (widget.episodeGroups.length > 1)
-                _SourceSelector(
-                  sourceNames: widget.sourceNames,
-                  currentIndex: _groupIndex,
-                  onSelect: (i) => _switchEpisode(i, 0),
-                )
-              else
-                Text(_sourceName, style: AppTypography.caption),
-              // 全屏按钮：桌面 + 移动（TV 始终全屏无需切换）
-              if (!PlatformService.isTv &&
-                  (_isDesktopPlatform || PlatformService.isMobile)) ...[
-                const SizedBox(width: AppSpacing.md),
-                _FocusableRow(
-                  onActivate: _toggleFullscreen,
-                  child: Icon(
-                    _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                    color: Colors.white70,
-                    size: 18,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xs),
-
-          // 高频 position/buffer 更新只重建这一行。
-          ValueListenableBuilder<PlaybackProgressState>(
-            valueListenable: _progressState,
-            builder: (context, progress, _) => Row(
-              children: [
-                Text(_fmt(progress.position), style: AppTypography.caption),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: ExcludeFocus(
-                    excluding: PlatformService.isTv,
-                    child: _buildSlider(progress),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                _BufferAheadLabel(progress: progress, compact: isMobile),
-                const SizedBox(width: AppSpacing.sm),
-                Text(_fmt(progress.duration), style: AppTypography.caption),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-
-          // 按钮行
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _Btn(
-                icon: Icons.skip_previous,
-                onTap: _hasPrev
-                    ? () => _switchEpisode(_groupIndex, _episodeIndex - 1)
-                    : null,
-              ),
-              SizedBox(width: btnGap),
-              _HoldBtn(
-                icon: Icons.replay_10,
-                onHoldStart: () => _startSeekHold(false),
-                onHoldEnd: _stopSeekHold,
-              ),
-              SizedBox(width: btnGap),
-              _Btn(
-                icon: _playing ? Icons.pause : Icons.play_arrow,
-                size: 48,
-                focusNode: _playPauseFocusNode,
-                onTap: () {
-                  _engine.playOrPause();
-                  _showControls();
-                },
-              ),
-              SizedBox(width: btnGap),
-              _HoldBtn(
-                icon: Icons.forward_10,
-                onHoldStart: () => _startSeekHold(true),
-                onHoldEnd: _stopSeekHold,
-              ),
-              SizedBox(width: btnGap),
-              _Btn(
-                icon: Icons.skip_next,
-                onTap: _hasNext
-                    ? () => _switchEpisode(_groupIndex, _episodeIndex + 1)
-                    : null,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLeanbackControlBar() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Colors.transparent, Color(0xB3000000), Color(0xF5000000)],
-          stops: [0.0, 0.42, 1.0],
-        ),
-      ),
-      padding: const EdgeInsets.fromLTRB(72, 56, 72, 34),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.videoTitle,
-                      style: AppTypography.title.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      '${_current.name} · ${widget.site.name} · $_sourceName${_currentQuality.isAuto ? '' : ' · ${_qualityLabel(_currentQuality)}'}',
-                      style: AppTypography.body.copyWith(
-                        color: Colors.white60,
-                        fontSize: 16,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    if (_panel != null) _buildPanel(),
                   ],
                 ),
               ),
-              if (_qualities.length > 1) ...[
-                const SizedBox(width: AppSpacing.md),
-                _LeanbackActionButton(
-                  icon: Icons.hd,
-                  label: _currentQuality.isAuto
-                      ? '自动'
-                      : _qualityLabel(_currentQuality),
-                  dense: true,
-                  onTap: _showTvQualityPicker,
-                ),
-              ],
-              const SizedBox(width: AppSpacing.sm),
-              _LeanbackActionButton(
-                icon: Icons.speed,
-                label: _speedLabel(_playbackSpeed),
-                dense: true,
-                onTap: _showTvSpeedPicker,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _LeanbackActionButton(
-                icon: Icons.swap_horiz,
-                label: _sourceName,
-                dense: true,
-                onTap: widget.episodeGroups.length > 1
-                    ? _showTvSourcePicker
-                    : null,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _LeanbackActionButton(
-                icon: Icons.video_library,
-                label: '选集',
-                dense: true,
-                onTap: _showTvEpisodePicker,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _LeanbackActionButton(
-                icon: Icons.tune,
-                label: '更多',
-                dense: true,
-                onTap: _showPlaybackOptionsPanel,
-              ),
-              if (_isDesktopPlatform || PlatformService.isMobile) ...[
-                const SizedBox(width: AppSpacing.sm),
-                _LeanbackActionButton(
-                  icon: _isFullscreen
-                      ? Icons.fullscreen_exit
-                      : Icons.fullscreen,
-                  label: _isFullscreen ? '退出' : '全屏',
-                  dense: true,
-                  onTap: _toggleFullscreen,
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          ValueListenableBuilder<PlaybackProgressState>(
-            valueListenable: _progressState,
-            builder: (context, progress, _) => Row(
-              children: [
-                SizedBox(
-                  width: 70,
-                  child: Text(
-                    _fmt(progress.position),
-                    style: AppTypography.body.copyWith(color: Colors.white70),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: _isDesktopPlatform
-                      ? _buildSlider(progress)
-                      : _buildTvProgressBar(progress),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                _BufferAheadLabel(progress: progress),
-                const SizedBox(width: AppSpacing.md),
-                SizedBox(
-                  width: 88,
-                  child: Text(
-                    _fmt(progress.duration),
-                    textAlign: TextAlign.right,
-                    style: AppTypography.body.copyWith(color: Colors.white70),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _LeanbackActionButton(
-                icon: Icons.skip_previous,
-                label: '上一集',
-                onTap: _hasPrev
-                    ? () => _switchEpisode(_groupIndex, _episodeIndex - 1)
-                    : null,
-              ),
-              const SizedBox(width: AppSpacing.md),
-              _LeanbackActionButton(
-                icon: Icons.replay_10,
-                label: '后退',
-                onTap: () => _seekRelative(const Duration(seconds: -10)),
-              ),
-              const SizedBox(width: AppSpacing.lg),
-              _LeanbackPlayButton(
-                playing: _playing,
-                focusNode: _playPauseFocusNode,
-                onTap: () {
-                  _engine.playOrPause();
-                  _showControls();
-                },
-              ),
-              const SizedBox(width: AppSpacing.lg),
-              _LeanbackActionButton(
-                icon: Icons.forward_10,
-                label: '前进',
-                onTap: () => _seekRelative(const Duration(seconds: 10)),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              _LeanbackActionButton(
-                icon: Icons.skip_next,
-                label: '下一集',
-                onTap: _hasNext
-                    ? () => _switchEpisode(_groupIndex, _episodeIndex + 1)
-                    : null,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTvProgressBar(PlaybackProgressState state) {
-    if (!state.hasKnownDuration) {
-      return const ClipRRect(
-        borderRadius: BorderRadius.all(Radius.circular(4)),
-        child: LinearProgressIndicator(
-          minHeight: 8,
-          backgroundColor: Color(0xFF343434),
-          color: Colors.white30,
-        ),
-      );
-    }
-    final animationDuration = _seeking
-        ? Duration.zero
-        : const Duration(milliseconds: 250);
-    return TweenAnimationBuilder<double>(
-      tween: Tween(end: state.bufferedRatio),
-      duration: animationDuration,
-      curve: Curves.linear,
-      builder: (context, animatedBuffered, _) => TweenAnimationBuilder<double>(
-        tween: Tween(end: state.progressRatio),
-        duration: animationDuration,
-        curve: Curves.linear,
-        builder: (context, animatedProgress, _) => SizedBox(
-          height: 8,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Container(color: const Color(0xFF343434)),
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: animatedBuffered.clamp(0.0, 1.0),
-                  child: Container(color: Colors.white24),
-                ),
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: animatedProgress.clamp(0.0, 1.0),
-                  child: Container(color: AppColors.netflixRed),
-                ),
-              ],
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSlider(PlaybackProgressState state) {
-    if (!state.hasKnownDuration) {
-      return const ClipRRect(
-        borderRadius: BorderRadius.all(Radius.circular(2)),
-        child: LinearProgressIndicator(
-          minHeight: 4,
-          backgroundColor: Color(0xFF3A3A3A),
-          color: Colors.white30,
-        ),
-      );
-    }
-    final sliderTheme = SliderThemeData(
-      trackHeight: 4,
-      activeTrackColor: AppColors.netflixRed,
-      // 未缓冲区域：偏暗灰，让缓冲指示条能从中"突出"
-      inactiveTrackColor: const Color(0xFF3A3A3A),
-      // 缓冲指示条：半透明白，位于 active 和 inactive 之间
-      secondaryActiveTrackColor: Colors.white30,
-      thumbColor: AppColors.netflixRed,
-      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-      overlayShape: SliderComponentShape.noOverlay,
-    );
-
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(end: state.bufferedRatio),
-      duration: _seeking ? Duration.zero : const Duration(milliseconds: 250),
-      curve: Curves.linear,
-      builder: (context, animatedBuffered, _) => TweenAnimationBuilder<double>(
-        tween: Tween<double>(end: state.progressRatio),
-        duration: _seeking ? Duration.zero : const Duration(milliseconds: 200),
-        curve: Curves.linear,
-        builder: (context, animatedProgress, _) {
-          final currentValue = animatedProgress.clamp(0.0, 1.0);
-          final secondary = animatedBuffered < currentValue
-              ? currentValue
-              : animatedBuffered.clamp(0.0, 1.0);
-          return SliderTheme(
-            data: sliderTheme,
-            child: Slider(
-              value: currentValue,
-              secondaryTrackValue: secondary,
-              onChangeStart: (_) {
-                _hideTimer?.cancel();
-                setState(() => _seeking = true);
-              },
-              onChanged: (value) {
-                _position = Duration(
-                  milliseconds: (value * state.duration.inMilliseconds).round(),
-                );
-                _publishProgressState();
-              },
-              onChangeEnd: (value) {
-                final target = Duration(
-                  milliseconds: (value * state.duration.inMilliseconds).round(),
-                );
-                setState(() => _seeking = false);
-                _seekTo(target);
-                _scheduleHide();
-              },
-            ),
-          );
-        },
       ),
     );
   }

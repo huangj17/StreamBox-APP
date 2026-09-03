@@ -74,7 +74,7 @@ void main() {
       expect(find.text('正在缓冲'), findsNothing);
       expect(tester.getSize(find.byKey(_videoKey)), viewport);
 
-      await tester.pump(const Duration(seconds: 4));
+      await tester.pump(const Duration(seconds: 6));
       await tester.pump(const Duration(milliseconds: 250));
       expect(tester.getSize(find.byKey(_videoKey)), viewport);
       await tester.tapAt(Offset(viewport.width / 2, viewport.height / 2));

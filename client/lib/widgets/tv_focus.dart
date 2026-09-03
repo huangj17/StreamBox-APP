@@ -64,6 +64,7 @@ class _TvFocusableState extends State<TvFocusable> {
   bool _focused = false;
   Timer? _longPressTimer;
   bool _longTriggered = false;
+  LogicalKeyboardKey? _activationKey;
 
   @override
   void initState() {
@@ -76,6 +77,9 @@ class _TvFocusableState extends State<TvFocusable> {
   @override
   void didUpdateWidget(covariant TvFocusable oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!widget.handleActivation || widget.focusNode != oldWidget.focusNode) {
+      _cancelActivation();
+    }
     if (widget.focusNode != oldWidget.focusNode) {
       _node.removeListener(_handleNodeFocus);
       if (_ownsNode) _node.dispose();
@@ -95,6 +99,7 @@ class _TvFocusableState extends State<TvFocusable> {
 
   void _handleNodeFocus() {
     if (_node.hasFocus == _focused) return;
+    if (!_node.hasFocus) _cancelActivation();
     setState(() => _focused = _node.hasFocus);
     widget.onFocusChange?.call(_node.hasFocus);
     if (_node.hasFocus && widget.ensureVisibleOnFocus) {
@@ -116,32 +121,46 @@ class _TvFocusableState extends State<TvFocusable> {
       k == LogicalKeyboardKey.numpadEnter ||
       k == LogicalKeyboardKey.gameButtonA;
 
+  void _cancelActivation() {
+    _activationKey = null;
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _longTriggered = false;
+  }
+
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (!widget.handleActivation) return KeyEventResult.ignored;
     if (!_isActivationKey(event.logicalKey)) return KeyEventResult.ignored;
+    if (event.synthesized) {
+      _cancelActivation();
+      return KeyEventResult.handled;
+    }
 
     if (event is KeyDownEvent) {
-      _longTriggered = false;
+      _cancelActivation();
+      _activationKey = event.logicalKey;
       if (widget.onLongActivate != null) {
-        _longPressTimer?.cancel();
         _longPressTimer = Timer(widget.longPressThreshold, () {
           _longTriggered = true;
-          widget.onLongActivate!();
+          widget.onLongActivate?.call();
         });
       }
       return KeyEventResult.handled;
     }
     if (event is KeyUpEvent) {
-      _longPressTimer?.cancel();
-      if (!_longTriggered) {
+      // 返回页面时可能只收到别处按下的确认键松开事件，不能据此激活。
+      final activate = _activationKey == event.logicalKey && !_longTriggered;
+      _cancelActivation();
+      if (activate) {
         widget.onActivate?.call();
       }
       return KeyEventResult.handled;
     }
-    return KeyEventResult.ignored;
+    return KeyEventResult.handled;
   }
 
   void _handleTap() {
+    _cancelActivation();
     widget.onActivate?.call();
   }
 
