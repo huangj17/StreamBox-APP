@@ -102,11 +102,11 @@ flutter run -d macos
 
 片源页只展示简短同步状态；版本、地址、检查频率和完整错误可从「详情」查看。启动时会一次性移除已被官方缓存覆盖的重复 OuonnkiTV Lite 订阅，保留原地址、缓存及片源偏好，仍可手动重新添加恢复；含独有片源的订阅不受影响。
 
-默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；固定官方配置入口及原生产 Bridge 的三个指定 API 允许 HTTP，其他订阅、CMS 和 Gateway 的安全限制不变。待发布的完整列表：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；固定官方配置入口及原生产 Bridge 的三个指定 API 允许 HTTP，其他订阅、CMS 和 Gateway 的安全限制不变。完整官方列表：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
 
 ### 恢复原生产片源
 
-[合并配置](deploy/streambox/sources.json) 保留 2026-09-03 线上已有的 16 个片源及顺序，在「官方片源」同一个列表末尾追加以下 3 个，共 19 个。更新客户端并将该文件发布到官方配置地址后，在设置中选择「立即更新」即可加载；不会添加独立分组，也不会改变当前首页或本地启停偏好。
+[合并配置](deploy/streambox/sources.json) 保留 2026-09-03 线上已有的 16 个片源及顺序，在「官方片源」同一个列表末尾追加以下 3 个，共 19 个。该列表已发布到官方配置地址；安装 v0.4.0 或更新版本后，在设置中选择「立即更新」即可加载；不会添加独立分组，也不会改变当前首页或本地启停偏好。
 
 | 片源 | 生产 CMS 接口 |
 | --- | --- |
