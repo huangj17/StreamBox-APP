@@ -15,16 +15,17 @@ void main(List<String> args) {
       throw const FormatException('配置文件不能超过 256 KiB');
     }
     final raw = jsonDecode(file.readAsStringSync());
-    if (raw is! Map<String, dynamic>) {
-      throw const FormatException('配置必须是 JSON 对象');
-    }
     final catalog = OfficialSourceCatalog.fromJson(raw);
     stdout.writeln(
       '有效配置：${catalog.version}，${catalog.config.sites.length} 个片源',
     );
     for (final site in catalog.config.sites) {
       stdout.writeln(
-        '${site.isEnabled ? '启用' : '停用'} · ${site.name} · ${site.api}',
+        '${!site.isSupported
+            ? '暂不兼容（不会请求）'
+            : site.isEnabled
+            ? '启用'
+            : '停用'} · ${site.name} · ${site.api}',
       );
     }
   } catch (error) {

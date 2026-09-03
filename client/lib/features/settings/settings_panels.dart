@@ -33,10 +33,10 @@ class _SidebarItem extends StatelessWidget {
             constraints: const BoxConstraints(minHeight: 60),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             decoration: BoxDecoration(
-              color: focused
-                  ? const Color(0xFF333338)
-                  : isSelected
+              color: isSelected
                   ? const Color(0xFF341A20)
+                  : focused
+                  ? const Color(0xFF333338)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(

@@ -27,12 +27,22 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
   String? _error;
   final _filterFocus = FocusNode(debugLabel: 'source-problem-filter');
   final _updateFocus = FocusNode(debugLabel: 'source-update');
+  final _detailsFocus = FocusNode(debugLabel: 'source-sync-details');
 
   @override
   void dispose() {
     _filterFocus.dispose();
     _updateFocus.dispose();
+    _detailsFocus.dispose();
     super.dispose();
+  }
+
+  Future<void> _showSyncDetails(SourceGroup group) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _SourceSyncDetails(url: group.url),
+    );
+    if (mounted) _detailsFocus.requestFocus();
   }
 
   Future<void> _remove(SourceGroup group) async {
@@ -113,6 +123,13 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (builtIn && group != null)
+                  _SourceButton(
+                    focusNode: _detailsFocus,
+                    label: '详情',
+                    icon: Icons.info_outline_rounded,
+                    onActivate: () => _showSyncDetails(group),
+                  ),
                 _SourceButton(
                   label: widget.checking ? '检测中…' : '检测全部',
                   icon: Icons.refresh_rounded,
@@ -144,25 +161,10 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           ],
         ),
         if (builtIn && group != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            group.usingFallback
-                ? '本地兜底 · 尚未成功同步'
-                : '配置版本：${group.version ?? '—'}',
-            style: AppTypography.body,
-          ),
-          Text(
-            '上次同步：${_syncTime(group.syncedAt)} · 前台每 30 分钟检查',
-            style: AppTypography.body,
-          ),
-          Text(SourceStorage.officialUrl, style: AppTypography.body),
-          if (Uri.parse(SourceStorage.officialUrl).scheme == 'http')
-            Text(
-              '当前配置使用 HTTP，建议服务器启用 HTTPS',
-              style: AppTypography.body.copyWith(color: AppColors.warning),
-            ),
+          const SizedBox(height: 10),
+          _SourceSyncSummary(group: group),
         ],
-        if (errors.isNotEmpty || _error != null)
+        if ((!builtIn && errors.isNotEmpty) || _error != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Text(
@@ -224,6 +226,8 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                       ? '没有异常片源'
                       : group?.warehouses.isNotEmpty == true
                       ? '选择一个仓库，查看其中的片源'
+                      : group?.needsInitialSync == true
+                      ? '尚未获取官方片源，请选择「立即更新」'
                       : '这里还没有片源',
                   textAlign: TextAlign.center,
                   style: AppTypography.body,
@@ -247,14 +251,6 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
         const SizedBox(height: 16),
       ],
     );
-  }
-
-  String _syncTime(DateTime? time) {
-    if (time == null) return '尚未同步';
-    final local = time.toLocal();
-    String two(int value) => value.toString().padLeft(2, '0');
-    return '${local.year}-${two(local.month)}-${two(local.day)} '
-        '${two(local.hour)}:${two(local.minute)}';
   }
 }
 

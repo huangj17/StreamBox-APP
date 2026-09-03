@@ -26,6 +26,8 @@ Map<String, dynamic> _site(String key, String api, {bool enabled = true}) => {
 };
 String _document(List<Map<String, dynamic>> sites, {String version = 'v1'}) =>
     jsonEncode({'schemaVersion': 1, 'version': version, 'sites': sites});
+Map<String, dynamic> _arraySite(String id, String url, {bool enabled = true}) =>
+    {'id': id, 'name': id, 'url': url, 'isEnabled': enabled};
 
 void main() {
   late Directory temp;
@@ -63,10 +65,9 @@ void main() {
     ); // Join the startup request, do not fetch twice.
   }
 
-  test('发布文件与本地兜底兼容，保留旧内置历史 key', () {
+  test('服务器端发布示例保留旧内置历史 key', () {
     final published = OfficialSourceCatalog.fromJson(
-      jsonDecode(File('../deploy/streambox/sources.json').readAsStringSync())
-          as Map<String, dynamic>,
+      jsonDecode(File('../deploy/streambox/sources.json').readAsStringSync()),
     );
     expect(published.config.sites.map((s) => s.api), SourceStorage.builtInUrls);
     expect(
@@ -75,13 +76,240 @@ void main() {
     );
   });
 
-  test('HTTP 例外仅用于指定官方地址，不改变普通配置和 CMS 限制', () {
+  test('上传的 15 条数组片源可同步，HTTP 行不阻塞整份配置且重启可恢复', () async {
+    adapter.body = File(
+      'test/fixtures/official_sources_array.json',
+    ).readAsStringSync();
+    await start();
+    expect(library.state.groups[_url]!.error, isNull);
+    expect(library.state.allSites, hasLength(15));
+    expect(library.state.activeSites, hasLength(14));
+    expect(library.state.allSites.first.name, '红牛资源');
+    expect(library.state.allSites[2].key, 'official:api-guangsuapi-com');
+    expect(library.state.allSites.every((site) => site.type == 3), isTrue);
+    final unsupported = library.state.allSites.singleWhere(
+      (site) => site.name == '电影天堂',
+    );
+    expect(unsupported.isSupported, isFalse);
+    expect(unsupported.api, startsWith('http://'));
+    expect(adapter.requests.map((request) => request.uri.toString()), [_url]);
+    final snapshot = storage.getOfficialSnapshot()!;
+    expect(snapshot.catalog.toJson(), isA<List>());
+    expect(snapshot.catalog.version, matches(r'^array-[0-9a-f]{12}$'));
+    expect(
+      (snapshot.catalog.toJson() as List).first['detailUrl'],
+      'https://www.hongniuzy.com',
+    );
+    await library.selectHome(library.state.activeSites[1]);
+    final home = library.state.homeIdentity;
+    await library.setEnabled(library.state.allSites.first, false);
+
+    library.dispose();
+    await Hive.close();
+    await storage.init();
+    adapter.status = 503;
+    library = SourceLibraryNotifier(storage, parser);
+    await start();
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+    expect(library.state.groups[_url]!.version, snapshot.catalog.version);
+    expect(library.state.allSites, hasLength(15));
+    expect(library.state.activeSites, hasLength(13));
+    expect(library.state.homeIdentity, home);
+    expect(library.state.allSites.first.isEnabled, isFalse);
+    expect(
+      storage.getOfficialSnapshot()!.catalog.toJson(),
+      snapshot.catalog.toJson(),
+    );
+  });
+
+  test('无版本数组按规范化内容生成版本，更新顺序、地址和开关均会变化', () {
+    final entries = [_arraySite('a', _apiA), _arraySite('b', _apiB)];
+    final original = OfficialSourceCatalog.fromJson(entries);
+    final reorderedFields = jsonDecode(
+      const JsonEncoder.withIndent('  ').convert([
+        for (final entry in entries)
+          Map.fromEntries(entry.entries.toList().reversed),
+      ]),
+    );
+    expect(
+      OfficialSourceCatalog.fromJson(reorderedFields).version,
+      original.version,
+    );
+    expect(
+      OfficialSourceCatalog.fromJson(original.toJson()).version,
+      original.version,
+    );
+    for (final updated in [
+      entries.reversed.toList(),
+      [_arraySite('a', 'https://new.example/api.php'), entries.last],
+      [_arraySite('a', _apiA, enabled: false), entries.last],
+      [
+        {...entries.first, 'name': '新名称'},
+        entries.last,
+      ],
+    ]) {
+      expect(
+        OfficialSourceCatalog.fromJson(updated).version,
+        isNot(original.version),
+      );
+    }
+    final defaults = OfficialSourceCatalog.fromJson([
+      {'id': 'defaults', 'name': '默认片源', 'url': _apiA},
+    ]).config.sites.single;
+    expect(defaults.isEnabled, isTrue);
+    expect(defaults.searchable, isTrue);
+    expect(defaults.type, 3);
+  });
+
+  test('旧对象和新数组共享稳定 ID，数组换地址、停用和回滚保留用户偏好', () async {
+    await start();
+    final old = library.state.allSites.first;
+    await library.selectHome(old);
+    await library.setEnabled(old, false);
+    adapter.body = jsonEncode([
+      _arraySite('b', _apiB, enabled: false),
+      _arraySite('a', 'https://new.example/api.php'),
+    ]);
+    await library.refresh(_url);
+    final updated = library.state.allSites.last;
+    expect(updated.key, old.key);
+    expect(updated.isEnabled, isFalse);
+    expect(library.state.homeIdentity, updated.identity);
+    expect(library.state.activeSites, isEmpty);
+    await library.setEnabled(library.state.allSites.first, true);
+    expect(library.state.activeSites, isEmpty, reason: '官方停用仍优先于本地选择');
+
+    await library.setEnabled(updated, true);
+    adapter.body = jsonEncode([
+      _arraySite('a', _apiA),
+      _arraySite('b', _apiB, enabled: false),
+    ]);
+    await library.refresh(_url);
+    expect(library.state.activeSites.single.identity, _apiA);
+    expect(library.state.homeIdentity, _apiA);
+    expect(storage.getSiteEnabled()[_apiA], isTrue);
+  });
+
+  test('上传格式的红牛 ID 保留旧内置历史 key 和首页偏好', () async {
+    await storage.saveOfficialSnapshot(
+      OfficialSourceSnapshot(
+        OfficialSourceCatalog.fromJson(
+          jsonDecode(
+            _document([_site('hongniu', SourceStorage.builtInUrls.last)]),
+          ),
+        ),
+        now,
+      ),
+    );
+    adapter.status = 503;
+    await start();
+    final old = library.state.allSites.last;
+    await library.selectHome(old);
+    await library.setEnabled(old, false);
+    adapter.status = 200;
+    adapter.body = jsonEncode([_arraySite('www-hongniuzy-com', _apiA)]);
+    await library.refresh(_url);
+    final updated = library.state.allSites.single;
+    expect(updated.key, old.key);
+    expect(updated.isEnabled, isFalse);
+    expect(library.state.homeIdentity, _apiA);
+    expect(
+      storage.getOfficialSnapshot()!.catalog.config.sites.single.key,
+      old.key,
+    );
+  });
+
+  test('数组条目校验失败保留完整旧缓存，不接纳私网、脚本或重复身份', () async {
+    adapter.body = jsonEncode([_arraySite('a', _apiA)]);
+    await start();
+    final good = storage.getOfficialSnapshot()!.catalog.toJson();
+    final malformed = <Object?>[
+      null,
+      1,
+      {},
+      {'name': '缺少 ID', 'url': _apiB},
+      {..._arraySite('b', _apiB), 'name': ''},
+      {..._arraySite('b', _apiB), 'id': 'bad id'},
+      {..._arraySite('b', _apiB), 'isEnabled': 'false'},
+      {..._arraySite('b', _apiB), 'searchable': 1},
+      {..._arraySite('b', _apiB), 'detailUrl': {}},
+      {..._arraySite('b', _apiB), 'type': 4},
+      for (final url in [
+        'https://127.0.0.1/api.php',
+        'http://192.168.1.1/api.php',
+        'http://[::1]/api.php',
+        'https://localhost/api.php',
+        'https://host.localhost/api.php',
+        'file:///etc/passwd',
+        'https://user:pass@public.example/api.php',
+        'https://public.example/spider.js',
+      ])
+        _arraySite('b', url),
+      _arraySite('a', _apiB),
+      _arraySite('b', '$_apiA/'),
+    ];
+    final documents = [
+      for (final bad in malformed) jsonEncode([_arraySite('a', _apiA), bad]),
+      jsonEncode(
+        List.generate(201, (i) => _arraySite('s$i', 'https://s$i.example/api')),
+      ),
+      jsonEncode([
+        _arraySite('hongniu', _apiA),
+        _arraySite('www-hongniuzy-com', _apiB),
+      ]),
+    ];
+    for (final document in documents) {
+      adapter.body = document;
+      await library.refresh(_url);
+      expect(library.state.groups[_url]!.error, isNotNull, reason: document);
+      expect(storage.getOfficialSnapshot()!.catalog.toJson(), good);
+      expect(library.state.activeSites.single.api, _apiA);
+    }
+  });
+
+  test('仅含 HTTP 的数组保留不兼容行，不启用、不设为首页、不恢复兜底', () async {
+    const api = 'http://public.example/api.php';
+    adapter.body = jsonEncode([_arraySite('http', api)]);
+    await start();
+    final site = library.state.allSites.single;
+    expect(site.api, api);
+    expect(site.isSupported, isFalse);
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+    expect(library.state.groups[_url]!.error, isNull);
+    await library.setEnabled(site, true);
+    await library.selectHome(site);
+    expect(library.state.activeSites, isEmpty);
+    expect(library.state.homeIdentity, isNull);
+    expect(
+      storage.getOfficialSnapshot()!.catalog.config.sites.single.isSupported,
+      isFalse,
+    );
+    expect(() => UrlPolicy.requireCmsApiUrl(api), throwsFormatException);
+  });
+
+  test('官方配置仅放行指定 HTTP IP，普通订阅和 CMS 仍拒绝公网 HTTP', () {
+    expect(_url, 'http://1.14.171.39/streambox/sources.json');
     expect(UrlPolicy.requireOfficialConfigUrl(_url).toString(), _url);
     expect(() => UrlPolicy.requireConfigUrl(_url), throwsFormatException);
+    expect(
+      UrlPolicy.requireOfficialConfigUrl(
+        'https://1.14.171.39/streambox/sources.json',
+      ).scheme,
+      'https',
+    );
     for (final target in [
+      'http://stvbox.cloud/streambox/sources.json',
+      'https://stvbox.cloud/streambox/sources.json',
+      'https://stvbox.cloud/other.json',
+      'https://stvbox.cloud:8443/streambox/sources.json',
+      'https://stvbox.cloud/streambox/sources.json?different=1',
+      'https://user:pass@stvbox.cloud/streambox/sources.json',
       'http://1.14.171.39/other.json',
+      'https://1.14.171.39/other.json',
       'http://1.14.171.39:8080/streambox/sources.json',
+      'https://1.14.171.39:8443/streambox/sources.json',
       'http://1.14.171.39/streambox/sources.json?different=1',
+      'http://1.14.171.39/streambox/sources.json#fragment',
       'http://user:pass@1.14.171.39/streambox/sources.json',
       'http://elsewhere.example/streambox/sources.json',
       'https://127.0.0.1/streambox/sources.json',
@@ -96,18 +324,33 @@ void main() {
       () => UrlPolicy.requireCmsApiUrl('http://a.example/api.php'),
       throwsFormatException,
     );
+    expect(() => UrlPolicy.requireCmsApiUrl(_url), throwsFormatException);
+    expect(() => UrlPolicy.requireGatewayUrl(_url), throwsFormatException);
   });
 
-  test('首次离线使用兜底，联网后整份替换并保留自定义源', () async {
+  test('首次离线不注入旧内置源，联网后加载远程列表并保留自定义源', () async {
     adapter.status = 503;
     await start();
-    expect(
-      library.state.activeSites.map((s) => s.api),
-      SourceStorage.builtInUrls,
-    );
-    expect(library.state.groups[_url]!.usingFallback, isTrue);
+    expect(library.state.allSites, isEmpty);
+    expect(library.state.groups[_url]!.config, isNull);
+    expect(library.state.groups[_url]!.needsInitialSync, isTrue);
+    expect(library.state.groups[_url]!.error, contains('暂无本地缓存'));
     expect(storage.getOfficialSnapshot(), isNull);
     await library.add('https://custom.example/api.php');
+    await library.selectHome(library.state.activeSites.single);
+
+    library.dispose();
+    await Hive.close();
+    await storage.init();
+    library = SourceLibraryNotifier(storage, parser, now: () => now);
+    await start();
+    expect(library.state.groups[_url]!.needsInitialSync, isTrue);
+    expect(
+      library.state.activeSites.single.api,
+      'https://custom.example/api.php',
+    );
+    expect(library.state.homeIdentity, 'https://custom.example/api.php');
+
     adapter.status = 200;
     await library.refresh(_url);
     expect(library.state.activeSites.map((s) => s.api), [
@@ -115,10 +358,44 @@ void main() {
       _apiB,
       'https://custom.example/api.php',
     ]);
-    expect(library.state.groups[_url]!.usingFallback, isFalse);
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
     expect(library.state.groups[_url]!.version, 'v1');
     expect(library.state.groups[_url]!.syncedAt, now);
+    expect(adapter.requests.last.uri.toString(), _url);
     expect(adapter.requests.last.headers['Cache-Control'], 'no-cache');
+  });
+
+  test('HTTPS 版升级后只请求 HTTP IP，新地址离线仍立即恢复原缓存', () async {
+    const oldUrl = 'https://stvbox.cloud/streambox/sources.json';
+    await Hive.box<String>(
+      'source_urls',
+    ).put('_official_sources_migrated_v1', '1');
+    await Hive.box<String>(
+      'source_urls',
+    ).put('_official_sources_https_migrated_v1', '1');
+    await storage.add(oldUrl);
+    await storage.setSelected(oldUrl);
+    await storage.saveOfficialSnapshot(
+      OfficialSourceSnapshot(
+        OfficialSourceCatalog.fromJson(
+          jsonDecode(adapter.body) as Map<String, dynamic>,
+        ),
+        now,
+      ),
+    );
+    await storage.setHomeSite(_apiB);
+    await storage.setSiteEnabled({_apiA: false});
+    adapter.status = 503;
+
+    await start();
+
+    expect(library.state.groups.keys, [_url]);
+    expect(adapter.requests.map((r) => r.uri.toString()), [_url]);
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+    expect(library.state.groups[_url]!.version, 'v1');
+    expect(library.state.groups[_url]!.error, contains('保留上次成功配置'));
+    expect(library.state.activeSites.single.api, _apiB);
+    expect(library.state.homeIdentity, _apiB);
   });
 
   test('远程增删、重排、同版本修改与回滚均生效，旧内置源不复活', () async {
@@ -145,7 +422,9 @@ void main() {
     final documents = [
       '<html>nginx</html>',
       '{',
-      '[]',
+      'null',
+      'true',
+      '123',
       '{"schemaVersion":1,"version":"missing-sites"}',
       '{"schemaVersion":2,"version":"v2","sites":[]}',
       '{"schemaVersion":1,"version":"","sites":[]}',
@@ -176,22 +455,24 @@ void main() {
     expect(storage.getOfficialSnapshot()!.catalog.toJson(), good);
   });
 
-  test('空 sites 是明确下架，重启断网也不恢复兜底', () async {
-    await start();
-    adapter.body = _document([]);
-    await library.refresh(_url);
-    expect(library.state.activeSites, isEmpty);
-    library.dispose();
-    await Hive.close();
-    await storage.init();
-    adapter.status = 503;
-    library = SourceLibraryNotifier(storage, parser);
-    await start();
-    expect(library.state.activeSites, isEmpty);
-    expect(library.state.groups[_url]!.usingFallback, isFalse);
-  });
+  for (final emptyDocument in ['[]', _document([])]) {
+    test('空列表是明确下架，重启断网也不恢复兜底：$emptyDocument', () async {
+      await start();
+      adapter.body = emptyDocument;
+      await library.refresh(_url);
+      expect(library.state.activeSites, isEmpty);
+      library.dispose();
+      await Hive.close();
+      await storage.init();
+      adapter.status = 503;
+      library = SourceLibraryNotifier(storage, parser);
+      await start();
+      expect(library.state.activeSites, isEmpty);
+      expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+    });
+  }
 
-  test('有缓存时立即显示；缓存损坏时使用兜底，失败不会覆盖成功时间', () async {
+  test('有缓存时立即显示；失败不覆盖成功时间，缓存损坏时不补回旧内置源', () async {
     await start();
     library.dispose();
     adapter.pending = Completer<String>();
@@ -211,11 +492,10 @@ void main() {
     adapter.status = 503;
     library = SourceLibraryNotifier(storage, parser);
     await start();
-    expect(library.state.groups[_url]!.usingFallback, isTrue);
-    expect(
-      library.state.activeSites.map((s) => s.api),
-      SourceStorage.builtInUrls,
-    );
+    expect(library.state.groups[_url]!.needsInitialSync, isTrue);
+    expect(library.state.groups[_url]!.error, contains('暂无本地缓存'));
+    expect(library.state.allSites, isEmpty);
+    expect(storage.getOfficialSnapshot(), isNull);
   });
 
   test('用户偏好随稳定 key 换地址，官方停用不能被本地启用覆盖', () async {
@@ -362,21 +642,48 @@ void main() {
     library = SourceLibraryNotifier(storage, parser);
   });
 
-  test('重定向逐跳验证，只允许原地址升级到可信 HTTPS', () async {
+  test('官方重定向逐跳验证，拒绝跳回域名、跨域和路径变更', () async {
     for (final location in [
+      'https://stvbox.cloud/streambox/sources.json',
+      'http://stvbox.cloud/streambox/sources.json',
+      'https://stvbox.cloud/different.json',
       'http://elsewhere.example/config.json',
       'https://elsewhere.example/config.json',
       'https://127.0.0.1/config.json',
       'http://1.14.171.39/different.json',
     ]) {
       adapter.requests.clear();
-      adapter.redirect = location;
+      adapter.redirects = [location];
       await expectLater(parser.parseOfficialCatalog(), throwsFormatException);
       expect(adapter.requests, hasLength(1));
     }
     adapter.requests.clear();
-    adapter.redirect = _url.replaceFirst('http:', 'https:');
+    adapter.redirects = ['/streambox/sources.json'];
     expect((await parser.parseOfficialCatalog()).version, 'v1');
+    expect(adapter.requests, hasLength(2));
+  });
+
+  test('允许同 IP 同路径升级到 HTTPS，但之后不能降级回 HTTP', () async {
+    const upgraded = 'https://1.14.171.39/streambox/sources.json';
+    adapter.redirects = [upgraded];
+    expect((await parser.parseOfficialCatalog()).version, 'v1');
+    expect(adapter.requests.map((request) => request.uri.toString()), [
+      _url,
+      upgraded,
+    ]);
+
+    adapter.requests.clear();
+    adapter.redirects = [upgraded, _url];
+    await expectLater(
+      parser.parseOfficialCatalog(),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('降级'),
+        ),
+      ),
+    );
     expect(adapter.requests, hasLength(2));
   });
 
@@ -411,7 +718,7 @@ void main() {
 class _Adapter implements HttpClientAdapter {
   String body = '';
   int status = 200;
-  String? redirect;
+  List<String> redirects = [];
   bool cancelled = false;
   Completer<String>? pending;
   final requests = <RequestOptions>[];
@@ -424,12 +731,12 @@ class _Adapter implements HttpClientAdapter {
   ) async {
     requests.add(options);
     cancelFuture?.then((_) => cancelled = true);
-    if (redirect != null && options.uri.scheme == 'http') {
+    if (requests.length <= redirects.length) {
       return ResponseBody.fromString(
         '',
         302,
         headers: {
-          'location': [redirect!],
+          'location': [redirects[requests.length - 1]],
         },
       );
     }

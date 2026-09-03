@@ -19,7 +19,6 @@ class SourceGroup {
   final String? error;
   final String? version;
   final DateTime? syncedAt;
-  final bool usingFallback;
 
   const SourceGroup({
     required this.url,
@@ -30,10 +29,13 @@ class SourceGroup {
     this.error,
     this.version,
     this.syncedAt,
-    this.usingFallback = false,
   });
 
   String get name => SourceStorage.nameOf(url);
+
+  /// A successfully synced empty catalog is distinct from having no cache.
+  bool get needsInitialSync =>
+      url == SourceStorage.officialUrl && config == null;
 
   SourceGroup withStatus({bool loading = false, String? error}) => SourceGroup(
     url: url,
@@ -44,7 +46,6 @@ class SourceGroup {
     error: error,
     version: version,
     syncedAt: syncedAt,
-    usingFallback: usingFallback,
   );
 }
 
@@ -59,7 +60,7 @@ class SourceLibrary {
     this.homeIdentity,
   });
 
-  /// 内置与集合共享同一接口时只保留一个身份，避免重复搜索/历史失联。
+  /// 官方与集合共享同一接口时只保留一个身份，避免重复搜索/历史失联。
   List<Site> get allSites {
     final unique = <String, Site>{};
     final keys = <String>{};
@@ -143,11 +144,9 @@ class SourceLibraryNotifier extends StateNotifier<SourceLibrary> {
           url: url == SourceStorage.officialUrl
               ? SourceGroup(
                   url: url,
-                  config: (snapshot?.catalog ?? OfficialSourceCatalog.bundled)
-                      .config,
+                  config: snapshot?.catalog.config,
                   version: snapshot?.catalog.version,
                   syncedAt: snapshot?.syncedAt,
-                  usingFallback: snapshot == null,
                 )
               : SourceGroup(
                   url: url,
@@ -389,8 +388,8 @@ class SourceLibraryNotifier extends StateNotifier<SourceLibrary> {
         groups: {
           ...state.groups,
           url: current.withStatus(
-            error: current.usingFallback
-                ? '更新失败，使用本地兜底片源：$error'
+            error: current.needsInitialSync
+                ? '更新失败，暂无本地缓存：$error'
                 : '更新失败，保留上次成功配置：$error',
           ),
         },

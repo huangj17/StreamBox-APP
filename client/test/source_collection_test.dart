@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:streambox/core/theme/app_theme.dart';
 import 'package:streambox/data/local/source_storage.dart';
+import 'package:streambox/data/models/official_source_catalog.dart';
 import 'package:streambox/data/models/source_health.dart';
 import 'package:streambox/data/sources/source_health_checker.dart';
 import 'package:streambox/data/sources/source_parser.dart';
@@ -52,6 +53,17 @@ void main() {
     Hive.init(temp.path);
     storage = SourceStorage();
     await storage.init();
+    // Official sources now come only from a successful remote snapshot.
+    await storage.saveOfficialSnapshot(
+      OfficialSourceSnapshot(
+        OfficialSourceCatalog.fromJson(
+          jsonDecode(
+            File('../deploy/streambox/sources.json').readAsStringSync(),
+          ),
+        ),
+        DateTime.utc(2026, 9, 2),
+      ),
+    );
     adapter = _Adapter();
     dio = Dio()..httpClientAdapter = adapter;
     library = SourceLibraryNotifier(storage, SourceParser(dio));
@@ -105,7 +117,7 @@ void main() {
     await expectLater(parser.parseDocument(collection), throwsFormatException);
   });
 
-  test('集合与内置源去重，首页独立选择，停用和缓存可恢复', () async {
+  test('集合与已缓存官方源去重，首页独立选择，停用和缓存可恢复', () async {
     await library.add(collection);
     expect(library.state.allSites, hasLength(5));
     expect(library.state.activeSites, hasLength(3));
@@ -132,7 +144,7 @@ void main() {
     restored.dispose();
   });
 
-  test('移除集合后保留共享内置源，迟到的更新不会复活已删除集合', () async {
+  test('移除集合后保留共享官方源，迟到的更新不会复活已删除集合', () async {
     await library.add(collection);
     adapter.pending = Completer<String>();
     final refresh = library.refresh(collection);

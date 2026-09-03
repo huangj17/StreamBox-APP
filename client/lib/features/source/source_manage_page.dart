@@ -17,6 +17,7 @@ import 'providers/source_provider.dart';
 import 'providers/source_library_provider.dart';
 part 'source_manage_widgets.dart';
 part 'source_group_widgets.dart';
+part 'source_sync_widgets.dart';
 
 class SourceManagePage extends ConsumerStatefulWidget {
   final bool embedded;

@@ -334,10 +334,12 @@ class _SourceDialog extends StatelessWidget {
   final String title;
   final String? subtitle;
   final List<Widget> children;
+  final ScrollController? scrollController;
   const _SourceDialog({
     required this.title,
     this.subtitle,
     required this.children,
+    this.scrollController,
   });
 
   @override
@@ -355,6 +357,7 @@ class _SourceDialog extends StatelessWidget {
           canRequestFocus: false,
           onKeyEvent: (_, event) => _dialogBack(context, event),
           child: SingleChildScrollView(
+            controller: scrollController,
             padding: const EdgeInsets.all(28),
             child: Column(
               mainAxisSize: MainAxisSize.min,

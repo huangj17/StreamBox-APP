@@ -46,11 +46,7 @@ class SourceParser {
         },
         maxBytes: 256 * 1024,
       ).timeout(const Duration(seconds: 20));
-      final json = jsonDecode(text);
-      if (json is! Map<String, dynamic>) {
-        throw const FormatException('官方配置必须是 JSON 对象');
-      }
-      return OfficialSourceCatalog.fromJson(json);
+      return OfficialSourceCatalog.fromJson(jsonDecode(text));
     } finally {
       cancel.cancel('Official configuration request completed');
     }

@@ -78,14 +78,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     super.dispose();
   }
 
-  void _selectSection(_SettingsSection section) {
+  void _selectSection(_SettingsSection section, {bool enterContent = false}) {
     setState(() => _selected = section);
+    if (!_compact && !enterContent) {
+      _sidebarNodes[section]!.requestFocus();
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted || _effectiveSelected != section) return;
       if (section == _SettingsSection.source) {
         _sourceEntry.requestFocus();
       } else {
-        _rightAnchor.nextFocus();
+        // Enter the first content control without traversing the sidebar.
+        _rightAnchor.traversalDescendants.firstOrNull?.requestFocus();
       }
     });
   }
@@ -129,7 +134,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
     if (index < 0) return KeyEventResult.ignored;
     if (key == LogicalKeyboardKey.arrowRight) {
-      _selectSection(_SettingsSection.values[index]);
+      _selectSection(_SettingsSection.values[index], enterContent: true);
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowDown) {

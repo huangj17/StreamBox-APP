@@ -54,6 +54,19 @@ class UrlPolicy {
     return uri;
   }
 
+  /// Validate catalog metadata only. Public HTTP sources may be listed as
+  /// unsupported; actual CMS requests still require [requireCmsApiUrl].
+  static Uri requireCatalogApiUrl(String raw) {
+    final uri = _parse(raw);
+    if (!{'http', 'https'}.contains(uri.scheme)) {
+      throw const FormatException('片源接口只允许 HTTP(S) 地址');
+    }
+    if (_isPrivateLiteral(uri.host) || _isLoopbackHost(uri.host)) {
+      throw const FormatException('片源接口不允许本机或私网地址');
+    }
+    return uri;
+  }
+
   static Uri requirePlaybackUrl(String raw) {
     final uri = _parse(raw);
     if (uri.scheme != 'https' && uri.scheme != 'http') {

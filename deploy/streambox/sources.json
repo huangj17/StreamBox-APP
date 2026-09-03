@@ -1,22 +1,19 @@
-{
-  "schemaVersion": 1,
-  "version": "2026-09-02.1",
-  "sites": [
-    {
-      "key": "baofeng",
-      "name": "暴风资源",
-      "type": 3,
-      "api": "https://bfzyapi.com/api.php/provide/vod/",
-      "searchable": true,
-      "isEnabled": true
-    },
-    {
-      "key": "hongniu",
-      "name": "红牛资源",
-      "type": 3,
-      "api": "https://www.hongniuzy2.com/api.php/provide/vod/",
-      "searchable": true,
-      "isEnabled": true
-    }
-  ]
-}
+[
+  {
+    "id": "baofeng",
+    "name": "暴风资源",
+    "type": 3,
+    "url": "https://bfzyapi.com/api.php/provide/vod/",
+    "searchable": true,
+    "isEnabled": true
+  },
+  {
+    "id": "www-hongniuzy-com",
+    "name": "红牛资源",
+    "type": 3,
+    "url": "https://www.hongniuzy2.com/api.php/provide/vod/",
+    "detailUrl": "https://www.hongniuzy.com",
+    "searchable": true,
+    "isEnabled": true
+  }
+]

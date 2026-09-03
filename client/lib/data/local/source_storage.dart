@@ -9,7 +9,7 @@ import '../models/source_config.dart';
 class SourceStorage {
   static const _boxName = 'source_urls';
 
-  /// 升级迁移前的两个内置 CMS URL；现在只用于识别旧记录与首次离线兜底。
+  /// 仅用于升级时识别并迁移两个旧内置 CMS 记录，不再作为离线兜底。
   static const builtInUrls = [
     'https://bfzyapi.com/api.php/provide/vod/',
     'https://www.hongniuzy2.com/api.php/provide/vod/',
@@ -18,7 +18,12 @@ class SourceStorage {
   static const officialUrl = OfficialSources.url;
   static const defaultSelectedUrl = officialUrl;
   static const _officialMigrationKey = '_official_sources_migrated_v1';
+  static const _officialEndpointMigrationKey =
+      '_official_sources_http_ip_migrated_v1';
+  static const _legacyOfficialUrl =
+      'https://stvbox.cloud/streambox/sources.json';
   static const _officialSnapshotKey = '_official_sources_snapshot_v1';
+  static const _liteMergeKey = '_official_lite_merged_v1';
 
   /// 已知片源的友好名称和描述。
   static const sourceInfo = <String, ({String name, String desc})>{
@@ -175,7 +180,7 @@ class SourceStorage {
       if (raw == null) return null;
       final json = jsonDecode(raw) as Map<String, dynamic>;
       return OfficialSourceSnapshot(
-        OfficialSourceCatalog.fromJson(json['catalog'] as Map<String, dynamic>),
+        OfficialSourceCatalog.fromJson(json['catalog']),
         DateTime.parse(json['syncedAt'] as String),
       );
     } catch (_) {
@@ -193,8 +198,41 @@ class SourceStorage {
         }),
       );
 
-  /// Migrate only the two formerly built-in URLs. Never run the old broad
-  /// cleanup: custom sources, preferences and warehouse selections belong to users.
+  /// Retire only the legacy Lite subscription already covered by the official
+  /// cache. Keep its URL/cache for recovery and never change API-keyed preferences.
+  Future<void> _mergeDuplicatedLite() async {
+    if (_box.get(_liteMergeKey) == '1') return;
+    final candidates = getAll()
+        .where((url) => nameOf(url) == 'OuonnkiTV Lite')
+        .toList();
+    final official = getOfficialSnapshot()?.catalog.config.sites ?? <Site>[];
+    if (candidates.isNotEmpty && official.isEmpty) return;
+    final covered = {for (final site in official) (site.identity, site.type)};
+    for (final url in candidates) {
+      final cached = getCachedConfig(url);
+      if (cached == null ||
+          cached.sites.isEmpty ||
+          getSelectedWarehouse(url) != null ||
+          !cached.sites.every(
+            (site) => covered.contains((site.identity, site.type)),
+          )) {
+        continue;
+      }
+      // Archive before retiring the subscription. Re-adding this URL restores
+      // the retained cache; the completed migration will not remove it again.
+      await _box.put('_merged_lite:$url', url);
+      if (getSelected() == url) await setSelected(officialUrl);
+      final keys = _box.keys
+          .whereType<int>()
+          .where((key) => _box.get(key) == url)
+          .toList();
+      await _box.deleteAll(keys);
+    }
+    await _box.put(_liteMergeKey, '1');
+  }
+
+  /// Only migrate identified legacy subscriptions. Never broadly clean up
+  /// custom sources, preferences or warehouse selections.
   Future<void> initDefaultsIfEmpty() async {
     if (_box.get(_officialMigrationKey) != '1') {
       final selected = getSelected();
@@ -210,6 +248,19 @@ class SourceStorage {
       await _box.put(_officialMigrationKey, '1');
     }
     await add(officialUrl);
+    if (officialUrl != _legacyOfficialUrl &&
+        _box.get(_officialEndpointMigrationKey) != '1') {
+      // Only replace the former app-owned endpoint. The shared snapshot and
+      // API-keyed preferences remain valid; other subscriptions are untouched.
+      if (getSelected() == _legacyOfficialUrl) await setSelected(officialUrl);
+      final legacyKeys = _box.keys
+          .whereType<int>()
+          .where((key) => _box.get(key) == _legacyOfficialUrl)
+          .toList();
+      await _box.deleteAll(legacyKeys);
+      await _box.put(_officialEndpointMigrationKey, '1');
+    }
+    await _mergeDuplicatedLite();
     final selected = getSelected();
     if (selected == null || !getAll().contains(selected)) {
       await setSelected(defaultSelectedUrl);

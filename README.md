@@ -77,7 +77,11 @@ flutter run -d macos
 
 安装支持远程配置的客户端后，只需维护服务器上的一个 JSON 文件，即可更新官方片源的地址、顺序和上下架状态。启动时后台同步，前台每 30 分钟检查，也可在「设置 → 配置源管理 → 官方片源」选择「立即更新」；网络失败时继续使用缓存，用户自定义源不被清理。
 
-初始文件：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和 HTTP 安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+客户端不再内置暴风、红牛两个兜底源；首次未同步成功且没有缓存时，官方列表为空，需联网同步或添加自定义源。
+
+片源页只展示简短同步状态；版本、地址、检查频率和完整错误可从「详情」查看。启动时会一次性移除已被官方缓存覆盖的重复 OuonnkiTV Lite 订阅，保留原地址、缓存及片源偏好，仍可手动重新添加恢复；含独有片源的订阅不受影响。
+
+默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；仅这个固定配置入口例外，其他订阅、CMS 和 Gateway 的安全限制不变。初始文件：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
 
 ## 环境要求
 
