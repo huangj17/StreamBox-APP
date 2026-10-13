@@ -28,7 +28,7 @@ labels: bug
 - 平台：<!-- Android / macOS / Windows -->
 - 系统版本：
 - App 版本 / Commit：<!-- 例如 v0.1.1 或 commit SHA -->
-- 是否使用 JAR Bridge：<!-- 是 / 否；若是请附 jar-bridge 版本 -->
+- 片源类型：<!-- CMS / Android 本机 JAR；JAR 问题请附 Android 版本及设备 ABI -->
 
 ## 截图 / 日志
 

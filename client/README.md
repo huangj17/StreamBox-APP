@@ -2,7 +2,7 @@
 
 **Netflix 风格的跨平台流媒体播放器** — 对接 TVBox 生态片源，以电视遥控器操作为优先，同时适配桌面键鼠与手机触摸。
 
-> 本目录是 Monorepo 下的 Flutter 客户端子项目。仓库总览见 [../README.md](../README.md)。可选后端服务见 [../jar-bridge/](../jar-bridge/)。
+> 本目录是 Monorepo 下的 Flutter 客户端子项目。仓库总览见 [../README.md](../README.md)。Android 本机插件宿主见 [android/README.md](android/README.md)。
 
 ---
 
@@ -11,7 +11,7 @@
 - **Netflix 风格 UI** — 深色沉浸设计、Hero Banner 轮播、横向分类滑轨、焦点放大动效
 - **TVBox 生态兼容** — 直接导入 TVBox JSON 配置源，复用已有片源生态
 - **苹果 CMS 对接** — 支持苹果 CMS V1/V3 接口，自动解析分类、视频列表与播放地址
-- **JAR 源支持（可选）** — 通过 [JAR Bridge](../jar-bridge/) 加载 TVBox Spider 插件，使用画质更好的 Type 4 片源
+- **Android 本机 JAR 源** — Android TV / Android 手机按需加载 `csp_` Spider 插件；其他平台隐藏 JAR 站点，全平台保留 CMS。
 - **流畅播放** — 基于 media_kit (libmpv) 引擎，原生支持 m3u8/HLS 视频流
 - **TV 优先的跨端交互** — Android TV、Windows 桌面、macOS（开发环境）；搜索、设置和播放页已包含窄屏与触摸布局，手机端持续完善
 - **优雅降级** — 每个内容行独立错误处理，单行失败不影响整页浏览（Netflix 降级策略）
@@ -118,7 +118,7 @@ flutter build macos                 # macOS .app
 ## 使用方法
 
 1. **管理配置源** — 设置 → 配置源管理。官方片源后台同步；「添加配置源」支持 CMS 接口、TVBox 单仓/多仓或 OuonnkiTV JSON 列表 URL。选择分组后确认片源行，打开该片源的操作弹窗；相同接口自动去重，异常源可重新检测。
-2. **原生产片源与本机 JAR 源** — 官方合并配置发布后，「荐片视频、爱看机器人、异世界动漫」与其他 CMS 源显示在同一个官方列表，可直接选择首页、启停或搜索；无需另加分组。自建时启动 [JAR Bridge](../jar-bridge/) 后，添加 `http://localhost:9978`。
+2. **Android 本机 JAR 源** — 在 Android TV / Android 手机上添加原始 TVBox 配置 URL；应用解析 `spider`、站点 `jar` 和 `ext`，选择内容时加载插件。非 Android 设备只显示配置中的 CMS。
 3. **选择首页内容** — 在片源操作弹窗选择「设为首页片源」。首页只加载所选片源的分类、Banner 与视频列表，顶部已移除切源栏。
 4. **搜索影片** — 确认关键词入口后输入片名，也可直接选择最近搜索。汇总所有已启用且未检测失败的片源，结果随返回随展示，卡片标明来源；切换首页片源不改变搜索范围。「管理」可删除或清空搜索历史。
 5. **观看影片** — 视频卡片 → 详情页 → 选集播放。底部显示片名、集数、片源与线路，自动记录进度；从「选集」「线路」「设置」打开对应侧栏。
@@ -186,7 +186,8 @@ flutter build macos                 # macOS .app
 | ------ | ------------------ | ----------------------------- |
 | Type 1 | 苹果 CMS V1（XML） |                               |
 | Type 3 | 苹果 CMS V3（JSON）| 推荐                          |
-| Type 4 | JAR (Spider)       | 通过 JAR Bridge 转 CMS 暴露   |
+| Type 3 + csp_ | Android JAR / DEX Spider | Android 本机运行，其他平台隐藏 |
+| Type 3 + JS/PY / Type 4 扩展 HTTP | 尚未接入 | 暂不支持 |
 
 苹果 CMS API 速查：
 

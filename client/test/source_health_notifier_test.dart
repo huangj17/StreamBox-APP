@@ -9,7 +9,7 @@ import 'package:streambox/data/sources/source_health_checker.dart';
 import 'package:streambox/features/source/providers/source_provider.dart';
 
 void main() {
-  for (final target in ['cms', 'config', 'gateway', 'media']) {
+  for (final target in ['cms', 'config', 'media']) {
     test('总超时会取消实际 $target 请求，不只结束界面等待', () async {
       final adapter = _CancellationAdapter(media: target == 'media');
       final dio = Dio()..httpClientAdapter = adapter;
@@ -25,7 +25,6 @@ void main() {
       addTearDown(notifier.dispose);
       final url = switch (target) {
         'config' => 'https://config.example/box.json',
-        'gateway' => 'https://gateway.example:9978',
         _ => 'https://cms.example/api.php',
       };
       notifier.setSources([url]);

@@ -1,20 +1,22 @@
+import 'package:flutter/foundation.dart';
 import '../../core/network/url_policy.dart';
 
-/// 片源站点，来自 TVBox 配置或 CMS 源列表。
-enum SiteSourceKind { cms, jar, manual, unknown }
+enum SiteSourceKind { cms, jar, unknown }
 
-enum GatewaySourceStatus { ready, degraded, failed, unknown }
-
+/// CMS endpoints are portable; csp_ entry points run only in the Android host.
 class Site {
   final String key;
   final String name;
-  final int type; // 0=XML, 1=JSON旧, 3=JSON主流, 4=TVBox JAR
+  final int type;
   final String api;
   final bool searchable;
   final bool isEnabled;
   final SiteSourceKind sourceKind;
-  final String? gatewayUrl;
-  final GatewaySourceStatus gatewayStatus;
+  final String? configUrl;
+  final String? jar;
+  final Object? ext;
+  final Map<String, dynamic> options;
+  final bool retiredBridge;
 
   const Site({
     required this.key,
@@ -24,102 +26,100 @@ class Site {
     this.searchable = true,
     this.isEnabled = true,
     this.sourceKind = SiteSourceKind.unknown,
-    this.gatewayUrl,
-    this.gatewayStatus = GatewaySourceStatus.unknown,
+    this.configUrl,
+    this.jar,
+    this.ext,
+    this.options = const {},
+    this.retiredBridge = false,
   });
 
-  factory Site.fromJson(Map<String, dynamic> json) => Site(
-    key: json['key']?.toString() ?? '',
-    name: json['name']?.toString() ?? '',
-    type: switch (json['type']) {
-      final num value => value.toInt(),
-      final String value => int.tryParse(value) ?? 3,
-      _ => 3,
-    },
-    api: json['api']?.toString() ?? '',
-    searchable: _boolLike(json['searchable'], defaultValue: true),
-    isEnabled: _boolLike(json['isEnabled'], defaultValue: true),
-    sourceKind: _sourceKindFromTvBox(json),
-  );
+  factory Site.fromJson(
+    Map<String, dynamic> json, {
+    String? configUrl,
+    String? defaultJar,
+  }) {
+    final base = configUrl ?? json['configUrl']?.toString();
+    final api = resolveReference(json['api']?.toString().trim() ?? '', base);
+    final jar = json['jar']?.toString() ?? defaultJar;
+    final rawExt = json['ext'];
+    return Site(
+      key: json['key']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      type: switch (json['type']) {
+        final num value => value.toInt(),
+        final String value => int.tryParse(value) ?? 3,
+        _ => 3,
+      },
+      api: api,
+      searchable: _boolLike(json['searchable'], defaultValue: true),
+      isEnabled: _boolLike(json['isEnabled'], defaultValue: true),
+      sourceKind: api.startsWith('csp_')
+          ? SiteSourceKind.jar
+          : _isHttp(api) && !_isScript(api)
+          ? SiteSourceKind.cms
+          : SiteSourceKind.unknown,
+      configUrl: base,
+      jar: jar == null ? null : resolveReference(jar, base),
+      ext: rawExt is String ? resolveReference(rawExt, base) : rawExt,
+      options: Map.unmodifiable(json),
+      retiredBridge:
+          json['retiredBridge'] == true ||
+          json['gatewayUrl'] != null ||
+          json['bridgeUrl'] != null ||
+          UrlPolicy.isRetiredBridgeUrl(api),
+    );
+  }
 
-  /// 从简单的 API URL 创建 Site（用于直接输入 CMS 地址的场景）
   factory Site.fromUrl(String url, {String? name}) => Site(
     key: url.hashCode.toString(),
-    name: name ?? url.split('/').where((s) => s.isNotEmpty).lastOrNull ?? url,
+    name: name ?? Uri.parse(url).host,
     type: 3,
     api: url,
     sourceKind: SiteSourceKind.cms,
+    retiredBridge: UrlPolicy.isRetiredBridgeUrl(url),
   );
 
-  factory Site.fromGateway({
-    required String gatewayUrl,
-    required String key,
-    required String name,
-    required String apiPath,
-    required SiteSourceKind kind,
-    required GatewaySourceStatus status,
-    bool searchable = true,
-  }) {
-    final normalizedGateway = gatewayUrl.endsWith('/')
-        ? gatewayUrl.substring(0, gatewayUrl.length - 1)
-        : gatewayUrl;
-    final baseUri = Uri.parse('$normalizedGateway/');
-    final resolvedApi = baseUri.resolve(apiPath).toString();
-    return Site(
-      // 保留 v1 的 key 前缀，避免已保存的 Bridge 插件选择失效。
-      key: 'bridge_$key',
-      name: name,
-      type: kind == SiteSourceKind.jar ? 4 : 3,
-      api: resolvedApi,
-      searchable: searchable,
-      sourceKind: kind,
-      gatewayUrl: normalizedGateway,
-      gatewayStatus: status,
-    );
+  bool get isJar => api.startsWith('csp_');
+  bool get isVisible => !retiredBridge && (!isJar || supportsAndroidJar);
+  static bool get supportsAndroidJar =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  bool get isSupported =>
+      isVisible &&
+      (isJar
+          ? jar != null && jar!.isNotEmpty && configUrl != null
+          : {0, 1, 3}.contains(type) &&
+                UrlPolicy.isSafeCmsApi(api) &&
+                !_isScript(api));
+
+  /// Keep bundle updates and shared class names from breaking source identity.
+  String get identity => isJar
+      ? 'jar:${configUrl ?? ''}#${options['upstreamKey'] ?? options['key'] ?? key}'
+      : canonicalApi(api);
+  Map<String, String> get headers {
+    final raw = options['header'];
+    return raw is Map
+        ? raw.map((k, v) => MapEntry(k.toString(), v.toString()))
+        : const {};
   }
-
-  /// 从 JAR Bridge /api/list 返回的 source 创建 Site
-  factory Site.fromBridge({
-    required String bridgeUrl,
-    required String key,
-    required String name,
-    required String apiPath,
-  }) {
-    return Site.fromGateway(
-      gatewayUrl: bridgeUrl,
-      key: key,
-      name: name,
-      apiPath: apiPath,
-      kind: SiteSourceKind.jar,
-      status: GatewaySourceStatus.ready,
-    );
-  }
-
-  /// TVBox 的 type=4 只表示 JAR 插件，并不代表它已能通过本项目 Bridge
-  /// 访问。只有由 `/api/list` 创建、携带 bridgeUrl 的站点才是真正的 Bridge。
-  bool get isGateway => gatewayUrl?.isNotEmpty ?? false;
-
-  /// v1 兼容 getter；新代码使用 [gatewayUrl] / [isGateway]。
-  String? get bridgeUrl => gatewayUrl;
-
-  bool get isBridge => isGateway;
-
-  /// 同一接口的尾斜杠差异不应产生重复站点；保留查询参数的意义。
-  String get identity => canonicalApi(api);
 
   static String canonicalApi(String api) {
     final uri = Uri.tryParse(api.trim());
-    if (uri == null) return api.trim();
-    return uri
-        .replace(path: uri.path.replaceFirst(RegExp(r'/+$'), ''))
-        .toString();
+    return uri == null
+        ? api.trim()
+        : uri
+              .replace(path: uri.path.replaceFirst(RegExp(r'/+$'), ''))
+              .toString();
   }
 
-  bool get isSupported =>
-      isGateway ||
-      (type != 4 &&
-          UrlPolicy.isSafeCmsApi(api) &&
-          !Uri.parse(api).path.toLowerCase().endsWith('.js'));
+  /// Resolve explicit relative references, leaving tokens and inline JSON intact.
+  static String resolveReference(String value, String? base) {
+    if (base == null || !(value.startsWith('./') || value.startsWith('../'))) {
+      return value;
+    }
+    final parts = value.split(';');
+    parts[0] = Uri.parse(base).resolve(parts.first).toString();
+    return parts.join(';');
+  }
 
   Site copyWith({String? key, String? name, bool? isEnabled}) => Site(
     key: key ?? this.key,
@@ -129,57 +129,32 @@ class Site {
     searchable: searchable,
     isEnabled: isEnabled ?? this.isEnabled,
     sourceKind: sourceKind,
-    gatewayUrl: gatewayUrl,
-    gatewayStatus: gatewayStatus,
+    configUrl: configUrl,
+    jar: jar,
+    ext: ext,
+    options: options,
+    retiredBridge: retiredBridge,
   );
-
   Map<String, dynamic> toJson() => {
+    ...options,
     'key': key,
     'name': name,
     'type': type,
     'api': api,
     'searchable': searchable,
     'isEnabled': isEnabled,
-    'gatewayUrl': gatewayUrl,
-    'sourceKind': sourceKind.name,
-    'gatewayStatus': gatewayStatus.name,
+    'configUrl': configUrl,
+    'jar': jar,
+    'ext': ext,
+    'retiredBridge': retiredBridge,
+    if (isJar) 'upstreamKey': options['upstreamKey'] ?? options['key'] ?? key,
   };
-
-  factory Site.fromCache(Map<String, dynamic> json) {
-    final site = Site.fromJson(json);
-    return Site(
-      key: site.key,
-      name: site.name,
-      type: site.type,
-      api: site.api,
-      searchable: site.searchable,
-      isEnabled: site.isEnabled,
-      gatewayUrl: json['gatewayUrl'] as String?,
-      sourceKind: SiteSourceKind.values.firstWhere(
-        (v) => v.name == json['sourceKind'],
-        orElse: () => site.sourceKind,
-      ),
-      gatewayStatus: GatewaySourceStatus.values.firstWhere(
-        (v) => v.name == json['gatewayStatus'],
-        orElse: () => GatewaySourceStatus.unknown,
-      ),
-    );
-  }
-
-  static SiteSourceKind _sourceKindFromTvBox(Map<String, dynamic> json) {
-    final type = switch (json['type']) {
-      final num value => value.toInt(),
-      final String value => int.tryParse(value) ?? 3,
-      _ => 3,
-    };
-    final api = json['api']?.toString().toLowerCase() ?? '';
-    if (type == 4 || api.startsWith('csp_')) {
-      return SiteSourceKind.jar;
-    }
-    if (api.startsWith('http') && !api.endsWith('.js')) {
-      return SiteSourceKind.cms;
-    }
-    return SiteSourceKind.unknown;
+  factory Site.fromCache(Map<String, dynamic> json) => Site.fromJson(json);
+  static bool _isHttp(String api) =>
+      api.startsWith('https://') || api.startsWith('http://');
+  static bool _isScript(String api) {
+    final path = Uri.tryParse(api)?.path.toLowerCase() ?? '';
+    return path.endsWith('.js') || path.endsWith('.py');
   }
 
   static bool _boolLike(Object? value, {required bool defaultValue}) =>

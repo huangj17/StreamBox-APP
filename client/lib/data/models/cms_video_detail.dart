@@ -2,7 +2,7 @@ import 'episode.dart';
 import 'video_item.dart';
 
 class CmsVideoDetail {
-  // Bridge plugins may use paths or slugs, e.g. "1618.html", as video IDs.
+  // Spider plugins may use paths or slugs, e.g. "1618.html", as video IDs.
   final String vodId;
   final String vodName;
   final String vodPic;
@@ -10,7 +10,7 @@ class CmsVideoDetail {
   final String vodPlayFrom;
   final String vodPlayUrl;
   final String vodPlayParse;
-  final bool isBridge;
+  final bool isJar;
   final String? vodYear;
   final String? vodClass;
   final String? vodRemarks;
@@ -29,7 +29,7 @@ class CmsVideoDetail {
     required this.vodPlayFrom,
     required this.vodPlayUrl,
     this.vodPlayParse = '',
-    this.isBridge = false,
+    this.isJar = false,
     this.vodYear,
     this.vodClass,
     this.vodRemarks,
@@ -43,7 +43,7 @@ class CmsVideoDetail {
 
   factory CmsVideoDetail.fromJson(
     Map<String, dynamic> json, {
-    bool isBridge = false,
+    bool isJar = false,
   }) {
     return CmsVideoDetail(
       vodId: json['vod_id']?.toString() ?? '',
@@ -53,7 +53,7 @@ class CmsVideoDetail {
       vodPlayFrom: json['vod_play_from']?.toString() ?? '',
       vodPlayUrl: json['vod_play_url']?.toString() ?? '',
       vodPlayParse: json['parse']?.toString() ?? '',
-      isBridge: isBridge,
+      isJar: isJar,
       vodYear: json['vod_year']?.toString(),
       vodClass: json['vod_class']?.toString(),
       vodRemarks: json['vod_remarks']?.toString(),
@@ -121,14 +121,11 @@ class CmsVideoDetail {
           );
         }
         final url = ep.substring(dollarIndex + 1);
-        final scheme = Uri.tryParse(url)?.scheme;
         return Episode(
           name: ep.substring(0, dollarIndex),
           url: url,
           sourceFlag: sourceFlag,
-          requiresResolve:
-              requiresResolve ||
-              (isBridge && scheme != 'http' && scheme != 'https'),
+          requiresResolve: requiresResolve || isJar,
         );
       }).toList();
     }).toList();

@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 网络权限：访问 CMS / JAR Bridge 等 HTTP API 必需。
+    <!-- 网络权限：访问 CMS、插件资源和媒体必需。
          注意：debug 构建会自动注入此权限，但 release 必须显式声明，否则装机后无网络。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
@@ -22,6 +22,10 @@
         android:banner="@drawable/streambox_banner"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
+        <service
+            android:name=".spider.SpiderService"
+            android:exported="false"
+            android:process=":spider" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

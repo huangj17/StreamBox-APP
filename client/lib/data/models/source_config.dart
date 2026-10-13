@@ -7,20 +7,45 @@ class SourceConfig {
   final List<Site> sites;
   final List<LiveSource> lives;
   final List<ParseRule> parses;
+  final String? configUrl;
+  final Map<String, dynamic> options;
 
   const SourceConfig({
     this.spider,
     required this.sites,
     this.lives = const [],
     this.parses = const [],
+    this.configUrl,
+    this.options = const {},
   });
 
-  factory SourceConfig.fromJson(Map<String, dynamic> json) {
+  factory SourceConfig.fromJson(
+    Map<String, dynamic> json, {
+    String? configUrl,
+  }) {
+    final base = configUrl ?? json['configUrl']?.toString();
+    final spider = json['spider']?.toString();
     return SourceConfig(
-      spider: json['spider']?.toString(),
+      configUrl: base,
+      options: Map.unmodifiable(json),
+      spider: spider == null ? null : Site.resolveReference(spider, base),
       sites: (json['sites'] is List ? json['sites'] as List : const [])
           .whereType<Map>()
-          .map((e) => Site.fromJson(Map<String, dynamic>.from(e)))
+          .map(
+            (e) => Site.fromJson(
+              {
+                ...Map<String, dynamic>.from(e),
+                'runtimeConfig': {
+                  'parses': json['parses'] ?? const [],
+                  'flags': json['flags'] ?? const [],
+                  'headers': json['headers'] ?? const [],
+                  'rules': json['rules'] ?? const [],
+                },
+              },
+              configUrl: base,
+              defaultJar: spider,
+            ),
+          )
           .toList(),
       lives: (json['lives'] is List ? json['lives'] as List : const [])
           .whereType<Map>()
@@ -36,8 +61,8 @@ class SourceConfig {
   /// 筛选出标准苹果 CMS 站点（api 是 http 开头，非 csp_ 或 js 脚本）
   List<Site> get cmsSites => sites.where((s) {
     final api = s.api.toLowerCase();
-    return !s.isBridge &&
-        s.type != 4 &&
+    return !s.isJar &&
+        s.isSupported &&
         UrlPolicy.isSafeCmsApi(s.api) &&
         !api.endsWith('.js');
   }).toList();

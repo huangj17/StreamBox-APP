@@ -74,7 +74,7 @@ class VideoItem {
   );
 
   /// 修复 Spider 返回的图片 URL：
-  /// - Bridge proxy URL 已由服务端修正 host，无需客户端处理
+  /// - Android 插件代理 URL 已由本机宿主生成，无需客户端处理
   /// - 拼接错误：https://domain1https://domain2/path → 取后半段
   static String fixCoverUrl(String url) {
     if (url.isEmpty) return url;

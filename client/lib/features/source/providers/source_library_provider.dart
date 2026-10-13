@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/official_sources.dart';
+import '../../../core/network/source_error_message.dart';
 import '../../../data/local/source_storage.dart';
 import '../../../data/models/official_source_catalog.dart';
 import '../../../data/models/site.dart';
@@ -17,6 +18,7 @@ class SourceGroup {
   final String? warehouseUrl;
   final bool loading;
   final String? error;
+  final String? errorDetails;
   final String? version;
   final DateTime? syncedAt;
 
@@ -27,6 +29,7 @@ class SourceGroup {
     this.warehouseUrl,
     this.loading = false,
     this.error,
+    this.errorDetails,
     this.version,
     this.syncedAt,
   });
@@ -37,13 +40,18 @@ class SourceGroup {
   bool get needsInitialSync =>
       url == SourceStorage.officialUrl && config == null;
 
-  SourceGroup withStatus({bool loading = false, String? error}) => SourceGroup(
+  SourceGroup withStatus({
+    bool loading = false,
+    String? error,
+    String? errorDetails,
+  }) => SourceGroup(
     url: url,
     config: config,
     warehouses: warehouses,
     warehouseUrl: warehouseUrl,
     loading: loading,
     error: error,
+    errorDetails: errorDetails,
     version: version,
     syncedAt: syncedAt,
   );
@@ -70,7 +78,7 @@ class SourceLibrary {
     ];
     for (final group in ordered) {
       for (var site in group.config?.sites ?? <Site>[]) {
-        if (unique.containsKey(site.identity)) continue;
+        if (!site.isVisible || unique.containsKey(site.identity)) continue;
         if (!keys.add(site.key)) {
           site = site.copyWith(key: '${site.key}@${site.identity}');
         }
@@ -237,27 +245,18 @@ class SourceLibraryNotifier extends StateNotifier<SourceLibrary> {
       String? warehouseUrl = previous.warehouseUrl;
       if (SourceParser.isCmsApiUrl(url)) {
         config = _direct(url);
-      } else if (SourceParser.isJarBridgeUrl(url)) {
-        config = await parser.parseJarBridge(url);
       } else {
-        final gateway = SourceParser.shouldProbeGateway(url)
-            ? await parser.probeGateway(url)
-            : null;
-        if (gateway != null) {
-          config = gateway;
-        } else {
-          final document = await parser.parseDocument(url);
-          warehouses = document.warehouses;
-          config = document.config;
-          if (warehouses.isNotEmpty) {
-            if (!warehouses.any((w) => w.url == warehouseUrl)) {
-              warehouseUrl = null;
-            }
-            if (warehouseUrl != null) {
-              config = SourceParser.isCmsApiUrl(warehouseUrl)
-                  ? _direct(warehouseUrl)
-                  : await parser.parse(warehouseUrl);
-            }
+        final document = await parser.parseDocument(url);
+        warehouses = document.warehouses;
+        config = document.config;
+        if (warehouses.isNotEmpty) {
+          if (!warehouses.any((w) => w.url == warehouseUrl)) {
+            warehouseUrl = null;
+          }
+          if (warehouseUrl != null) {
+            config = SourceParser.isCmsApiUrl(warehouseUrl)
+                ? _direct(warehouseUrl)
+                : await parser.parse(warehouseUrl);
           }
         }
       }
@@ -290,8 +289,9 @@ class SourceLibraryNotifier extends StateNotifier<SourceLibrary> {
             warehouses: previous.warehouses,
             warehouseUrl: previous.warehouseUrl,
             error: previous.config == null
-                ? '加载失败：$error'
-                : '更新失败，保留已保存的片源：$error',
+                ? '加载失败：${sourceErrorMessage(error)}'
+                : '更新失败，保留已保存的片源：${sourceErrorMessage(error)}',
+            errorDetails: error.toString(),
           ),
         },
       );
@@ -389,8 +389,9 @@ class SourceLibraryNotifier extends StateNotifier<SourceLibrary> {
           ...state.groups,
           url: current.withStatus(
             error: current.needsInitialSync
-                ? '更新失败，暂无本地缓存：$error'
-                : '更新失败，保留上次成功配置：$error',
+                ? '更新失败，暂无本地缓存：${sourceErrorMessage(error)}'
+                : '更新失败，保留上次成功配置：${sourceErrorMessage(error)}',
+            errorDetails: error.toString(),
           ),
         },
       );

@@ -1,3 +1,6 @@
+import org.gradle.api.tasks.compile.JavaCompile
+import org.gradle.jvm.tasks.Jar
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -28,6 +31,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "com.streambox.streambox.spider.HostInstrumentation"
         // 仅打包 ARM 架构：x86_64 只用于 Android 模拟器，且模拟器无法软件渲染播放视频。
         // Flutter 引擎的 ABI 由 --target-platform 控制（默认 release 全 ABI），
         // 此处通过 abiFilters 让 Flutter Gradle plugin 仅产出 arm 变体。
@@ -89,6 +93,7 @@ android {
 
     buildTypes {
         release {
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Release artifacts are deliberately left unsigned when credentials are
             // absent. CI supplies a persistent keystore and refuses to publish unless
             // the resulting certificate fingerprint matches the configured value.
@@ -99,6 +104,53 @@ android {
     }
 }
 
+// The fixture is compiled into a separate DEX archive, never the app's classes.
+// Instrumentation therefore tests actual dynamic loading rather than a class
+// accidentally found in the parent loader.
+android.sourceSets.getByName("androidTest").assets.srcDir(layout.buildDirectory.dir("spider-fixture"))
+val compileSpiderFixture = tasks.register<JavaCompile>("compileSpiderFixture") {
+    dependsOn("compileDebugJavaWithJavac")
+    source(fileTree("test-fixtures") { include("**/*.java") })
+    classpath = files(android.bootClasspath,
+        layout.buildDirectory.dir("intermediates/javac/debug/compileDebugJavaWithJavac/classes"),
+        providers.provider { tasks.named<JavaCompile>("compileDebugJavaWithJavac").get().classpath })
+    destinationDirectory.set(layout.buildDirectory.dir("spider-fixture-classes"))
+    sourceCompatibility = "17"
+    targetCompatibility = "17"
+}
+val packageSpiderFixture = tasks.register<Jar>("packageSpiderFixture") {
+    dependsOn(compileSpiderFixture)
+    from(compileSpiderFixture.flatMap { it.destinationDirectory })
+    archiveFileName.set("classes.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("spider-fixture-input"))
+}
+val dexSpiderFixture = tasks.register<Exec>("dexSpiderFixture") {
+    dependsOn(packageSpiderFixture)
+    inputs.file(packageSpiderFixture.flatMap { it.archiveFile })
+    outputs.file(layout.buildDirectory.file("spider-fixture/test-spider.jar"))
+    doFirst {
+        val output = layout.buildDirectory.file("spider-fixture/test-spider.jar").get().asFile
+        output.parentFile.mkdirs()
+        commandLine(File(android.sdkDirectory, "build-tools/${android.buildToolsVersion}/d8").path,
+            "--lib", android.bootClasspath.first().path,
+            "--classpath", layout.buildDirectory.dir("intermediates/javac/debug/compileDebugJavaWithJavac/classes").get().asFile.path,
+            "--min-api", android.defaultConfig.minSdk.toString(),
+            "--output", output.path, packageSpiderFixture.get().archiveFile.get().asFile.path)
+    }
+}
+tasks.configureEach {
+    if (name == "mergeDebugAndroidTestAssets") dependsOn(dexSpiderFixture)
+}
+
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // CatVod plugins reference these host APIs rather than bundling them.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.google.code.gson:gson:2.13.1")
+    implementation("wang.harlon.quickjs:wrapper-android:3.2.3")
+    implementation("wang.harlon.quickjs:wrapper-java:3.2.3")
+    testImplementation("junit:junit:4.13.2")
 }

@@ -3,10 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import '../../core/config/production_gateway.dart';
 
 import '../../core/network/bounded_response.dart';
-import '../../core/network/gateway_auth.dart';
 import '../../core/network/url_policy.dart';
 import '../models/cms_video_detail.dart';
 import '../models/source_health.dart';
@@ -45,8 +43,8 @@ class SourceHealthChecker {
     CancelToken? cancelToken,
   }) async {
     try {
-      if (SourceParser.isJarBridgeUrl(sourceUrl)) {
-        return await _checkGateway(sourceUrl, cancelToken: cancelToken);
+      if (UrlPolicy.isRetiredBridgeUrl(sourceUrl)) {
+        return SourceHealth.unavailable(message: '旧 JAR Bridge 已停用');
       }
       if (SourceParser.isCmsApiUrl(sourceUrl)) {
         return await _checkCms(sourceUrl, cancelToken: cancelToken);
@@ -67,28 +65,6 @@ class SourceHealthChecker {
     } catch (error) {
       return SourceHealth.unavailable(message: _friendlyError(error));
     }
-  }
-
-  Future<SourceHealth> _checkGateway(
-    String sourceUrl, {
-    CancelToken? cancelToken,
-  }) async {
-    final origin = Uri.parse(sourceUrl);
-    final config = await _parser.probeGateway(
-      sourceUrl,
-      cancelToken: cancelToken,
-      redirectValidator: (uri) => _validateRedirect(
-        uri,
-        requireHttps: true,
-        allowedLocalOrigin: origin,
-      ),
-    );
-    if (config == null || config.sites.isEmpty) {
-      return SourceHealth.unavailable(message: 'Bridge 未启动或没有可用插件');
-    }
-    return SourceHealth.unverified(
-      message: 'Bridge 目录正常 · ${config.sites.length} 个插件，播放待验证',
-    );
   }
 
   Future<SourceHealth> _checkConfig(
@@ -124,7 +100,7 @@ class SourceHealthChecker {
   }) async {
     final site = SourceParser.wrapCmsUrl(sourceUrl).sites.single;
     final origin = Uri.parse(site.api);
-    final headers = site.isBridge ? GatewayAuth.headersFor(origin) : null;
+    final headers = site.headers;
     Future<String> fetch(Map<String, dynamic> query) => getBoundedText(
       _dio,
       site.api,
@@ -132,45 +108,17 @@ class SourceHealthChecker {
       headers: headers,
       sendTimeout: _requestTimeout,
       receiveTimeout: _requestTimeout,
-      redirectValidator: ProductionGateway.isOrigin(origin)
-          ? (uri) => ProductionGateway.validateRedirect(origin, uri)
-          : (uri) => _validateRedirect(
-              uri,
-              requireHttps: true,
-              allowedLocalOrigin: origin,
-            ),
+      redirectValidator: (uri) => _validateRedirect(
+        uri,
+        requireHttps: true,
+        allowedLocalOrigin: origin,
+      ),
       maxBytes: _maxCmsBytes,
       cancelToken: cancelToken,
     );
     final String payload;
     try {
-      if (ProductionGateway.isApi(origin)) {
-        // Legacy Bridge rejects ac=detail without either a category or IDs.
-        // Some plugins include recommendations in their class response.
-        final home = await fetch(const {'ac': 'class'});
-        final data = _decodeCmsPayload(home);
-        if (data['list'] is List && (data['list'] as List).isNotEmpty) {
-          payload = home;
-        } else {
-          final categories = data['class'];
-          final category = categories is List
-              ? categories
-                    .whereType<Map>()
-                    .where((c) => c['type_id'] != null)
-                    .firstOrNull
-              : null;
-          if (category == null) {
-            return SourceHealth.unavailable(message: '片源未返回分类或内容');
-          }
-          payload = await fetch({
-            'ac': 'detail',
-            't': category['type_id'].toString(),
-            'pg': 1,
-          });
-        }
-      } else {
-        payload = await fetch(const {'ac': 'detail', 'pg': 1});
-      }
+      payload = await fetch(const {'ac': 'detail', 'pg': 1});
     } catch (error) {
       return SourceHealth.unavailable(
         message: '列表接口不可用：${_friendlyError(error)}',

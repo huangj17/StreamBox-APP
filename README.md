@@ -1,6 +1,6 @@
 # StreamBox
 
-Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。以电视、电视盒子和投影仪的遥控器操作为优先，同时适配桌面键鼠与手机触摸。本仓库为 Monorepo，包含 Flutter 客户端和 JAR Bridge 中间服务。
+Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。以电视、电视盒子和投影仪的遥控器操作为优先，同时适配桌面键鼠与手机触摸。全平台直接使用 CMS 接口；Android TV 和 Android 手机还可在本机运行 JAR/DEX Spider 插件，无需独立后端。
 
 ## 页面与交互
 
@@ -36,63 +36,31 @@ Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。以�
 | 目录          | 说明                                  | 技术栈                              | README                                       |
 | ------------- | ------------------------------------- | ----------------------------------- | -------------------------------------------- |
 | `client/`     | Flutter 客户端（主应用）              | Flutter/Dart + Riverpod + media_kit | [client/README.md](client/README.md)         |
-| `jar-bridge/` | StreamBox Gateway（CMS + JAR 运行时） | Kotlin + Ktor + Gradle              | [jar-bridge/README.md](jar-bridge/README.md) |
+| `client/android/` | Android 本机 Spider 宿主 | Kotlin + Android DEX / JNI | [原生宿主说明](client/android/README.md) |
 
-## 架构关系
+## 片源架构
 
-```
-StreamBox (Flutter) --HTTP--> StreamBox Gateway --Spider--> 内容站点
-                               |
-                               v
-                    config.yml + plugins/*.jar
+```text
+全平台 StreamBox ──HTTPS──> CMS 接口 ──> 播放器
+Android StreamBox ──原生通道──> 本机 Spider 进程 ──> 播放器
 ```
 
-- Gateway 属于 StreamBox 本项目，通过 `/api/list` 发现手工配置的 JAR 片源
-- Gateway 不自带片源，需要自行准备 Spider JAR 并写入 `config.yml`
-- 每个 source 的 API 格式与苹果 CMS 完全兼容（`ac=class`、`ac=detail`、`wd=` 等）
-- Gateway 是可选组件，StreamBox 在没有 Gateway 时仍可直接使用 CMS 源
-- 原生产 Bridge 的三个片源与 CMS 源共用官方列表；本机 Bridge 可通过「添加配置源」接入 `http://localhost:9978`
+CMS 可在所有平台显示和使用。`csp_` JAR 站点只在 Android 上显示，插件按需下载、校验与加载。
+其他平台导入混合 TVBox 配置后仅显示其中的 CMS 站点。JS/Python 运行时尚未接入。
+Android 插件媒体代理只监听本机，目录、搜索和解析不经过外部服务器。
 
 ## 快速开始
 
-根目录的 `dev.sh` 封装了两个子项目的常用命令，不用手动 `cd`：
-
 ```bash
-./dev.sh            # Bridge（后台）+ 客户端（前台），退出时自动收掉 Bridge
-./dev.sh bridge     # 只启动 JAR Bridge
-./dev.sh client     # 只启动 Flutter 客户端
-./dev.sh stop       # 停掉后台 Bridge
-./dev.sh test       # 两个子项目的 analyze + test
-./dev.sh build      # 两个子项目的构建
-./dev.sh --help     # 全部用法
-
-DEVICE=chrome ./dev.sh client        # 换目标设备
-./dev.sh client --verbose            # 额外参数透传给 flutter run
+./dev.sh                         # 启动 macOS 客户端
+DEVICE=<Android设备ID> ./dev.sh   # 启动 Android 客户端
+./dev.sh test                    # 静态检查与 Flutter 测试
+./dev.sh test-android            # Android 原生单元测试
+./dev.sh build apk --debug --target-platform android-arm64
 ```
 
-也可以按下面的方式手动在子项目目录下执行。
-
-### 仅 CMS 源（不需要 JAR 插件）
-
-```bash
-cd client
-flutter pub get
-flutter run -d macos
-```
-
-### 含 JAR 源（需要 Bridge）
-
-```bash
-# 终端 1：启动 Bridge
-cd jar-bridge
-./gradlew run                       # 仅监听 127.0.0.1:9978
-
-# 终端 2：启动客户端
-cd client
-flutter run -d macos
-```
-
-详细配置（添加 JAR 插件、DEX 转换、API 端点等）见 [jar-bridge/README.md](jar-bridge/README.md)。
+也可在 `client/` 中执行 `flutter pub get` 和 `flutter run -d <设备ID>`。
+Android JAR 配置、兼容范围及验收步骤见 [原生宿主说明](client/android/README.md)。
 
 ### 官方片源远程配置（免重新安装）
 
@@ -102,30 +70,19 @@ flutter run -d macos
 
 片源页只展示简短同步状态；版本、地址、检查频率和完整错误可从「详情」查看。启动时会一次性移除已被官方缓存覆盖的重复 OuonnkiTV Lite 订阅，保留原地址、缓存及片源偏好，仍可手动重新添加恢复；含独有片源的订阅不受影响。
 
-默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；固定官方配置入口及原生产 Bridge 的三个指定 API 允许 HTTP，其他订阅、CMS 和 Gateway 的安全限制不变。完整官方列表：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
+默认地址：[官方片源配置](http://1.14.171.39/streambox/sources.json)。支持 `id/name/url/isEnabled` 数组，无需手动填写版本号，并兼容旧对象格式。升级会将先前的 HTTPS 官方订阅迁移回此 IP，保留缓存和自定义源。当前入口使用 HTTP 明文传输，存在被篡改风险；仅固定官方配置入口保留 HTTP 兼容；CMS 和自定义订阅的地址限制保持不变。完整官方列表：[deploy/streambox/sources.json](deploy/streambox/sources.json)。上传路径、字段说明、发布校验、回滚和安全边界见 [远程配置部署指南](deploy/streambox/README.md)。
 
-### 恢复原生产片源
+### 旧 Bridge 迁移
 
-[合并配置](deploy/streambox/sources.json) 保留 2026-09-03 线上已有的 16 个片源及顺序，在「官方片源」同一个列表末尾追加以下 3 个，共 19 个。该列表已发布到官方配置地址；安装 v0.4.0 或更新版本后，在设置中选择「立即更新」即可加载；不会添加独立分组，也不会改变当前首页或本地启停偏好。
-
-| 片源 | 生产 CMS 接口 |
-| --- | --- |
-| 荐片视频 | `http://1.14.171.39:9978/api/jianpian` |
-| 爱看机器人 | `http://1.14.171.39:9978/api/ikanbot` |
-| 异世界动漫 | `http://1.14.171.39:9978/api/ysj` |
-
-如果上传后这三个源仍显示「暂不兼容」，先更新并重启客户端。JSON 只更新片源目录，不会更新正在运行的程序；旧客户端仍会拦截这些 HTTP 接口。更新后「待验证」表示后台尚未测通媒体，不妨碍选择首页或尝试播放。
-
-这三个接口由原 JAR Bridge 提供，客户端保留原片源身份、字符串影片 ID 和剧集解析流程；生产请求不发送个人 `STREAMBOX_GATEWAY_TOKEN`。片源增删、排序和启停仍由服务器 JSON 决定，没有额外的内置兜底列表。
-
-验证范围：三个源的分类、搜索和详情可返回内容；2026-09-03 使用重新编译的 macOS 客户端，荐片视频《火遮眼2025》已实际播放并推进到 00:25；异世界动漫抽样线路仍返回需要网页解析的地址，当前播放器会明确提示无法直接播放。接口在线不代表全部影片或线路可播放。
+独立 JVM Bridge 已移除，官方列表不再包含其三个远程接口。客户端升级时过滤旧接口和缓存的
+Gateway 元数据，清理已保存的 Bridge 订阅。CMS、自定义 TVBox 配置以及历史/收藏记录保留；
+原 Bridge 的历史记录不会自动映射到另一份插件，需要导入相应 Android TVBox 配置后重新选源。
+只有 JAR 站点的配置在非 Android 设备上显示为空，混合配置中的 CMS 仍然可用。
 
 ## 环境要求
 
-| 子项目     | 依赖                                                      |
-| ---------- | --------------------------------------------------------- |
-| client     | Flutter SDK >= 3.11、Dart SDK >= 3.11、CocoaPods（macOS） |
-| jar-bridge | JDK 21+                                                   |
+Flutter / Dart 按 `client/pubspec.yaml` 的 SDK 约束安装。Android 构建需要 Android SDK 和 JDK 17+；
+macOS 构建需要 Xcode / CocoaPods。Android 本机插件无需安装或启动独立服务器。
 
 ## 更新日志
 

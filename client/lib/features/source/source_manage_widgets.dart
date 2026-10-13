@@ -1,5 +1,25 @@
 part of 'source_manage_page.dart';
 
+class _SourceDensity extends InheritedWidget {
+  final bool compact;
+  const _SourceDensity({required this.compact, required super.child});
+  @override
+  bool updateShouldNotify(_SourceDensity oldWidget) =>
+      compact != oldWidget.compact;
+}
+
+bool _sourceCompact(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<_SourceDensity>()?.compact ??
+    (!PlatformService.isTv && MediaQuery.sizeOf(context).width < 620);
+
+TextStyle _sourceBody(BuildContext context) => _sourceCompact(context)
+    ? AppTypography.body.copyWith(fontSize: 15, height: 1.4)
+    : AppTypography.body;
+
+TextStyle _sourceTitle(BuildContext context) => _sourceCompact(context)
+    ? AppTypography.title.copyWith(fontSize: 19, height: 1.35)
+    : AppTypography.title;
+
 /// Large targets and a white focus outline, distinct from the red selection.
 class _SourceButton extends StatelessWidget {
   final String label;
@@ -23,6 +43,7 @@ class _SourceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = _sourceCompact(context);
     return Semantics(
       button: true,
       enabled: onActivate != null,
@@ -48,8 +69,14 @@ class _SourceButton extends StatelessWidget {
         },
         builder: (context, focused) => AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          constraints: const BoxConstraints(minHeight: 54, maxWidth: 520),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          constraints: BoxConstraints(
+            minHeight: compact ? 48 : 54,
+            maxWidth: 520,
+          ),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 12 : 18,
+            vertical: compact ? 8 : 12,
+          ),
           decoration: BoxDecoration(
             color: primary
                 ? AppColors.netflixRed
@@ -74,7 +101,7 @@ class _SourceButton extends StatelessWidget {
               if (icon != null) ...[
                 Icon(
                   icon,
-                  size: 22,
+                  size: compact ? 20 : 22,
                   color: onActivate == null
                       ? AppColors.secondaryText
                       : Colors.white,
@@ -86,7 +113,7 @@ class _SourceButton extends StatelessWidget {
                   label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: AppTypography.body.copyWith(
+                  style: _sourceBody(context).copyWith(
                     color: onActivate == null
                         ? AppColors.secondaryText
                         : Colors.white,
@@ -117,9 +144,10 @@ class _SourceOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = _sourceCompact(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(compact ? 14 : 18),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF2B1C20), Color(0xFF1C1C20)],
@@ -129,6 +157,42 @@ class _SourceOverview extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          if (compact) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.home_rounded,
+                  color: Color(0xFFFF5360),
+                  size: 26,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('当前首页片源', style: AppTypography.caption),
+                      const SizedBox(height: 3),
+                      Text(
+                        home?.name ?? '尚未选择片源',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: _sourceTitle(context).copyWith(
+                          color: AppColors.primaryText,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$enabled 个已启用 · 用于搜索',
+                        style: AppTypography.caption,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }
           final homeInfo = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -229,7 +293,9 @@ class _StatusBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   text,
-                  style: AppTypography.body.copyWith(color: Colors.white),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: _sourceBody(context).copyWith(color: Colors.white),
                 ),
               ),
             ],
@@ -345,9 +411,10 @@ class _SourceDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = _sourceCompact(context);
     return Dialog(
       backgroundColor: const Color(0xFF1C1C20),
-      insetPadding: const EdgeInsets.all(24),
+      insetPadding: EdgeInsets.all(compact ? 16 : 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: Color(0xFF3B3B42)),
@@ -359,15 +426,20 @@ class _SourceDialog extends StatelessWidget {
           onKeyEvent: (_, event) => _dialogBack(context, event),
           child: SingleChildScrollView(
             controller: scrollController,
-            padding: const EdgeInsets.all(28),
+            padding: EdgeInsets.all(compact ? 20 : 28),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(title, style: AppTypography.headline2),
+                Text(
+                  title,
+                  style: compact
+                      ? _sourceTitle(context)
+                      : AppTypography.headline2,
+                ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 10),
-                  Text(subtitle!, style: AppTypography.body),
+                  Text(subtitle!, style: _sourceBody(context)),
                 ],
                 const SizedBox(height: 24),
                 ...children,

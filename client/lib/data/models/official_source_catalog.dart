@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../../core/config/official_sources.dart';
-import '../../core/config/production_gateway.dart';
 import '../../core/network/url_policy.dart';
 import 'site.dart';
 import 'source_config.dart';
@@ -45,8 +44,8 @@ class OfficialSourceCatalog {
     if (entries is! List || entries.length > 200) {
       throw const FormatException('配置需要片源数组，最多 200 个片源');
     }
-    final keys = <String>{};
-    final apis = <String>{};
+    final keys = <String, String>{};
+    final apis = <String, Map<String, dynamic>>{};
     final sites = <Site>[];
     final normalized = <Map<String, dynamic>>[];
     for (final entry in entries) {
@@ -72,6 +71,7 @@ class OfficialSourceCatalog {
               : '片源需要有效的 key、name、api 和 CMS type',
         );
       }
+      if (UrlPolicy.isRetiredBridgeUrl(api)) continue;
       if (isArray) {
         // Store public HTTP metadata without authorizing requests to it.
         // Site.isSupported keeps such rows out of search, home and health checks.
@@ -94,9 +94,7 @@ class OfficialSourceCatalog {
         throw const FormatException('detailUrl 必须是有效字符串');
       }
       final stableKey = isArray ? (_arrayIdAliases[key] ?? key) : key;
-      if (!keys.add(stableKey) || !apis.add(Site.canonicalApi(api))) {
-        throw const FormatException('片源 key 或接口地址重复');
-      }
+      final identity = Site.canonicalApi(api);
       final item = <String, dynamic>{
         'key': key,
         'name': name.trim(),
@@ -105,6 +103,26 @@ class OfficialSourceCatalog {
         'searchable': entry['searchable'] ?? true,
         'isEnabled': entry['isEnabled'] ?? true,
       };
+      final previousIdentity = keys[stableKey];
+      if (previousIdentity != null && previousIdentity != identity) {
+        throw const FormatException('同一片源 ID 对应了不同接口地址');
+      }
+      final previous = apis[identity];
+      if (previous != null) {
+        // CMS lists often repeat an endpoint under another display name/ID.
+        // Keep the first entry and its stable history identity. Conflicting
+        // capabilities or official enablement remain an invalid update.
+        if (!isArray ||
+            previous['type'] != item['type'] ||
+            previous['searchable'] != item['searchable'] ||
+            previous['isEnabled'] != item['isEnabled']) {
+          throw const FormatException('重复片源的类型或启用设置冲突');
+        }
+        keys[stableKey] = identity;
+        continue;
+      }
+      keys[stableKey] = identity;
+      apis[identity] = item;
       normalized.add(
         isArray
             ? {
@@ -120,27 +138,10 @@ class OfficialSourceCatalog {
       );
       // Preserve old built-in history/favorite keys, including after URL changes.
       final legacyApi = OfficialSources.legacyApis[stableKey];
-      final plugin = ProductionGateway.pluginKey(Uri.parse(api.trim()));
       final historyKey = legacyApi != null
           ? legacyApi.hashCode.toString()
-          : ProductionGateway.pluginKeys.any(
-              (key) => stableKey == 'bridge_$key',
-            )
-          ? stableKey
           : 'official:$stableKey';
-      sites.add(
-        plugin != null
-            ? Site.fromGateway(
-                gatewayUrl: ProductionGateway.url,
-                key: plugin,
-                name: item['name'] as String,
-                apiPath: api.trim(),
-                kind: SiteSourceKind.jar,
-                status: GatewaySourceStatus.ready,
-                searchable: item['searchable'] as bool,
-              ).copyWith(key: historyKey, isEnabled: item['isEnabled'] as bool)
-            : Site.fromJson(item).copyWith(key: historyKey),
-      );
+      sites.add(Site.fromJson(item).copyWith(key: historyKey));
     }
     // Display-only content revision: whitespace and object key order do not
     // change it. This is not a signature and never gates accepting an update.

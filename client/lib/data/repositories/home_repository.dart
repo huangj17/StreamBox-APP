@@ -28,8 +28,13 @@ class HomeRepository {
     // 使用固定 worker 数与整批截止时间：坏源不会把首页拖到 Dio 重试结束，
     // 大型多源配置也不会一次性创建无上限的网络连接。
     final results = List<List<Category>>.generate(sites.length, (_) => []);
-    final deadline = DateTime.now().add(_categoryLoadBudget);
+    final deadline = DateTime.now().add(
+      sites.any((s) => s.isJar)
+          ? const Duration(seconds: 40)
+          : _categoryLoadBudget,
+    );
     var nextIndex = 0;
+    Object? jarError;
 
     Future<void> worker() async {
       while (nextIndex < sites.length) {
@@ -48,7 +53,8 @@ class HomeRepository {
                   return <Category>[];
                 },
               );
-        } catch (_) {
+        } catch (error) {
+          if (sites[index].isJar) jarError = error;
           results[index] = [];
         }
       }
@@ -60,6 +66,10 @@ class HomeRepository {
         (_) => worker(),
       ),
     );
+
+    if (sites.length == 1 && sites.single.isJar && jarError != null) {
+      throw jarError!;
+    }
 
     // 苹果 CMS 分类是两级结构：
     // typePid == 0 → 顶级父分类（电影/电视剧/动漫），无直接内容

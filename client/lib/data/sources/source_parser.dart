@@ -1,9 +1,7 @@
 import 'dart:convert';
 import '../../core/config/official_sources.dart';
-import '../../core/config/production_gateway.dart';
 import 'package:dio/dio.dart';
 import '../../core/network/bounded_response.dart';
-import '../../core/network/gateway_auth.dart';
 import '../../core/network/url_policy.dart';
 import '../models/source_config.dart';
 import '../models/site.dart';
@@ -22,7 +20,6 @@ class ParsedSourceDocument {
 /// 支持单仓（sites 数组）和多仓（urls / storeHouse 数组）格式
 class SourceParser {
   static const _maxConfigBytes = 5 * 1024 * 1024;
-  static const _maxGatewayListBytes = 1024 * 1024;
   final Dio _dio;
 
   SourceParser(this._dio);
@@ -59,7 +56,7 @@ class SourceParser {
     RedirectUriValidator? redirectValidator,
   }) async {
     final json = await _fetchJson(url, redirectValidator: redirectValidator);
-    return SourceConfig.fromJson(json);
+    return SourceConfig.fromJson(json, configUrl: url);
   }
 
   /// 下载一次配置文档，同时判断它是单仓还是多仓。
@@ -73,11 +70,13 @@ class SourceParser {
       redirectValidator: redirectValidator,
       cancelToken: cancelToken,
     );
-    final warehouses = _tryParseWarehouses(json);
+    final warehouses = _tryParseWarehouses(json, url);
     if (warehouses != null && warehouses.isNotEmpty) {
       return ParsedSourceDocument(warehouses: warehouses);
     }
-    return ParsedSourceDocument(config: SourceConfig.fromJson(json));
+    return ParsedSourceDocument(
+      config: SourceConfig.fromJson(json, configUrl: url),
+    );
   }
 
   /// 尝试将 URL 解析为多仓配置
@@ -87,7 +86,7 @@ class SourceParser {
     RedirectUriValidator? redirectValidator,
   }) async {
     final json = await _fetchJson(url, redirectValidator: redirectValidator);
-    return _tryParseWarehouses(json);
+    return _tryParseWarehouses(json, url);
   }
 
   /// 统一 OuonnkiTV 数组/单对象与 TVBox 配置，仍由同一套 CMS 播放。
@@ -105,7 +104,7 @@ class SourceParser {
       maxBytes: _maxConfigBytes,
       cancelToken: cancelToken,
     );
-    final decoded = jsonDecode(jsonStr);
+    final decoded = decodeSourceJson(jsonStr);
     if (decoded is List ||
         (decoded is Map<String, dynamic> &&
             decoded.containsKey('url') &&
@@ -149,7 +148,10 @@ class SourceParser {
   /// 尝试从 JSON 中提取多仓仓库列表
   /// 格式 1: {"urls": [{"url": "...", "name": "..."}]}
   /// 格式 2: {"storeHouse": [{"sourceUrl": "...", "sourceName": "..."}]}
-  static List<Warehouse>? _tryParseWarehouses(Map<String, dynamic> json) {
+  static List<Warehouse>? _tryParseWarehouses(
+    Map<String, dynamic> json,
+    String base,
+  ) {
     // 格式 1: urls 数组
     final urls = json['urls'];
     if (urls is List && urls.isNotEmpty) {
@@ -159,7 +161,7 @@ class SourceParser {
           .map(
             (e) => Warehouse(
               name: (e['name'] as String?) ?? '',
-              url: e['url'] as String,
+              url: Uri.parse(base).resolve(e['url'] as String).toString(),
             ),
           )
           .toList();
@@ -174,7 +176,7 @@ class SourceParser {
           .map(
             (e) => Warehouse(
               name: (e['sourceName'] as String?) ?? '',
-              url: e['sourceUrl'] as String,
+              url: Uri.parse(base).resolve(e['sourceUrl'] as String).toString(),
             ),
           )
           .toList();
@@ -183,207 +185,82 @@ class SourceParser {
     return null;
   }
 
-  /// 判断 URL 是 TVBox 配置源还是直接的苹果 CMS API 地址
-  /// TVBox 配置通常以 .json 结尾或包含 sites 字段
-  /// 苹果 CMS API 通常包含 api.php/provide/vod
   static bool isCmsApiUrl(String url) {
     final lower = url.toLowerCase();
-    return lower.contains('api.php') ||
-        lower.contains('/inc/apijson.php') ||
-        lower.contains('provide/vod') ||
-        isJarBridgePluginUrl(url);
+    return !UrlPolicy.isRetiredBridgeUrl(url) &&
+        (lower.contains('api.php') ||
+            lower.contains('/inc/apijson.php') ||
+            lower.contains('provide/vod'));
   }
 
-  /// Bridge 单插件 CMS 兼容端点，例如 http://127.0.0.1:9978/api/doll。
-  static bool isJarBridgePluginUrl(String url) {
-    final uri = Uri.tryParse(url.trim());
-    if (uri == null || uri.port != 9978) return false;
-    final segments = uri.pathSegments.where((part) => part.isNotEmpty).toList();
-    return segments.length >= 2 &&
-        segments[segments.length - 2].toLowerCase() == 'api' &&
-        segments.last.isNotEmpty;
-  }
-
-  /// 判断 URL 是否是 JAR Bridge 服务**根地址**（用于自动发现 /api/list）。
-  /// 含 `/api/<key>` 的子路径不算 —— 那是单个插件的 CMS 端点，按普通 CMS 源处理，
-  /// 这样用户可以手动添加 `http://<bridge>:9978/api/<key>` 形式访问 hidden 插件。
-  static bool isJarBridgeUrl(String url) {
-    final uri = Uri.tryParse(url.trim());
-    return uri != null && uri.port == 9978 && !isJarBridgePluginUrl(url);
-  }
-
-  /// 无路径的 HTTPS 地址可能是反向代理后的 Gateway；有明确配置文件路径的
-  /// URL 不做 /api/list 探测，避免普通配置源额外等待 2 秒。
-  static bool shouldProbeGateway(String url) {
-    if (isJarBridgeUrl(url)) return true;
-    final uri = Uri.tryParse(url.trim());
-    return uri != null &&
-        (uri.path.isEmpty || uri.path == '/') &&
-        !uri.hasQuery;
-  }
-
-  /// 解析 JAR Bridge 服务，通过 /api/list 发现所有可用插件
-  Future<SourceConfig> parseJarBridge(
-    String bridgeUrl, {
-    RedirectUriValidator? redirectValidator,
-  }) async {
-    final config = await probeGateway(
-      bridgeUrl,
-      redirectValidator: redirectValidator,
-    );
-    if (config == null) {
-      throw const FormatException('URL 未返回有效的 StreamBox Gateway Schema');
-    }
-    return config;
-  }
-
-  /// 短超时探测 StreamBox Gateway。仅 HTTP 200 不足以通过，必须具备
-  /// `code=200` 与结构合法的 `sources` 数组。
-  Future<SourceConfig?> probeGateway(
-    String gatewayUrl, {
-    RedirectUriValidator? redirectValidator,
-    CancelToken? cancelToken,
-  }) async {
-    final baseUrl = gatewayUrl.endsWith('/')
-        ? gatewayUrl.substring(0, gatewayUrl.length - 1)
-        : gatewayUrl;
-    final Uri baseUri;
-    try {
-      baseUri = UrlPolicy.requireGatewayUrl(baseUrl);
-    } on FormatException {
-      return null;
-    }
-    try {
-      final body = await getBoundedText(
-        _dio,
-        '$baseUrl/api/list',
-        headers: GatewayAuth.headersFor(baseUri),
-        sendTimeout: const Duration(seconds: 2),
-        receiveTimeout: const Duration(seconds: 2),
-        redirectValidator: ProductionGateway.isOrigin(baseUri)
-            ? (next) async {
-                ProductionGateway.validateRedirect(
-                  baseUri.resolve('/api/list'),
-                  next,
-                );
-                await redirectValidator?.call(next);
-              }
-            : redirectValidator,
-        maxBytes: _maxGatewayListBytes,
-        cancelToken: cancelToken,
-      );
-      final decoded = jsonDecode(body);
-      if (decoded is! Map<String, dynamic> || decoded['code'] != 200) {
-        return null;
-      }
-      final rawSources = decoded['sources'];
-      if (rawSources is! List<dynamic>) return null;
-
-      final sites = <Site>[];
-      for (final raw in rawSources) {
-        if (raw is! Map<String, dynamic>) return null;
-        final key = raw['key'];
-        final name = raw['name'];
-        final api = raw['api'];
-        if (key is! String ||
-            key.isEmpty ||
-            name is! String ||
-            api is! String ||
-            api.isEmpty) {
-          return null;
-        }
-        final status = _gatewayStatus(raw['status']);
-        if (status != GatewaySourceStatus.ready &&
-            status != GatewaySourceStatus.degraded) {
-          continue;
-        }
-        final kind = _gatewayKind(raw['kind']);
-        final site = Site.fromGateway(
-          gatewayUrl: baseUrl,
-          key: key,
-          name: name,
-          apiPath: api,
-          kind: kind,
-          status: status,
-          searchable: _boolLike(raw['searchable'], defaultValue: true),
-        );
-        final resolved = Uri.tryParse(site.api);
-        if (resolved == null ||
-            resolved.scheme != baseUri.scheme ||
-            resolved.host != baseUri.host ||
-            resolved.port != baseUri.port) {
-          return null;
-        }
-        if (ProductionGateway.isOrigin(baseUri) &&
-            ProductionGateway.pluginKey(resolved) == null) {
-          continue;
-        }
-        sites.add(site);
-      }
-      return SourceConfig(sites: sites);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static SiteSourceKind _gatewayKind(Object? value) =>
-      switch (value?.toString().toLowerCase()) {
-        'cms' => SiteSourceKind.cms,
-        'manual' => SiteSourceKind.manual,
-        'jar' || null || '' => SiteSourceKind.jar,
-        _ => SiteSourceKind.unknown,
-      };
-
-  static GatewaySourceStatus _gatewayStatus(Object? value) =>
-      switch (value?.toString().toLowerCase()) {
-        'degraded' => GatewaySourceStatus.degraded,
-        'failed' => GatewaySourceStatus.failed,
-        'ready' || null || '' => GatewaySourceStatus.ready,
-        _ => GatewaySourceStatus.unknown,
-      };
-
-  static bool _boolLike(Object? value, {required bool defaultValue}) =>
-      switch (value) {
-        final bool flag => flag,
-        final num number => number != 0,
-        final String text when text == '1' || text.toLowerCase() == 'true' =>
-          true,
-        final String text when text == '0' || text.toLowerCase() == 'false' =>
-          false,
-        _ => defaultValue,
-      };
-
-  /// 将普通 CMS API URL 包装为 SourceConfig
   static SourceConfig wrapCmsUrl(String url) {
-    final directBridge = isJarBridgePluginUrl(url);
-    final validated = UrlPolicy.requireCmsApiUrl(
-      url,
-      allowLoopback: directBridge,
-    );
-    if (directBridge) {
-      final segments = validated.pathSegments
-          .where((part) => part.isNotEmpty)
-          .toList();
-      final pluginKey = segments.last;
-      final apiIndex = segments.length - 2;
-      final basePath = segments.take(apiIndex).join('/');
-      final gatewayUri = validated.replace(
-        path: basePath.isEmpty ? '' : '/$basePath',
-        query: null,
-      );
-      return SourceConfig(
-        sites: [
-          Site.fromGateway(
-            gatewayUrl: gatewayUri.toString().replaceFirst(RegExp(r'/$'), ''),
-            key: pluginKey,
-            name: pluginKey,
-            apiPath: validated.toString(),
-            kind: SiteSourceKind.manual,
-            status: GatewaySourceStatus.ready,
-          ),
-        ],
-      );
-    }
-    return SourceConfig(sites: [Site.fromUrl(validated.toString())]);
+    final api = UrlPolicy.requireCmsApiUrl(url).toString();
+    return SourceConfig(sites: [Site.fromUrl(api)]);
   }
+}
+
+/// TVBox documents often contain JSON comments. Strip them with a string-aware
+/// scanner so https:// URLs, regex strings and escaped quotes remain intact.
+Object? decodeSourceJson(String source) {
+  if (source.startsWith('\ufeff')) source = source.substring(1);
+  final out = StringBuffer();
+  var quoted = false;
+  var escaped = false;
+  for (var i = 0; i < source.length; i++) {
+    final c = source[i];
+    if (quoted) {
+      out.write(c);
+      if (escaped) {
+        escaped = false;
+      } else if (c == r'\') {
+        escaped = true;
+      } else if (c == '"') {
+        quoted = false;
+      }
+      continue;
+    }
+    if (c == '"') {
+      quoted = true;
+      out.write(c);
+      continue;
+    }
+    if (c == '/' && i + 1 < source.length && source[i + 1] == '/') {
+      while (i < source.length && source[i] != '\n') {
+        i++;
+      }
+      out.write('\n');
+      continue;
+    }
+    if (c == '/' && i + 1 < source.length && source[i + 1] == '*') {
+      final end = source.indexOf('*/', i + 2);
+      if (end < 0) throw const FormatException('配置注释未结束');
+      i = end + 1;
+      continue;
+    }
+    out.write(c);
+  }
+  // Remove trailing commas in a second string-aware pass.
+  final clean = out.toString();
+  final result = StringBuffer();
+  quoted = false;
+  escaped = false;
+  for (var i = 0; i < clean.length; i++) {
+    final c = clean[i];
+    if (!quoted && c == ',') {
+      var j = i + 1;
+      while (j < clean.length && clean[j].trim().isEmpty) {
+        j++;
+      }
+      if (j < clean.length && (clean[j] == ']' || clean[j] == '}')) continue;
+    }
+    result.write(c);
+    if (escaped) {
+      escaped = false;
+    } else if (quoted && c == r'\') {
+      escaped = true;
+    } else if (c == '"') {
+      quoted = !quoted;
+    }
+  }
+  return jsonDecode(result.toString());
 }

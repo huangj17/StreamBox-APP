@@ -7,7 +7,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:streambox/core/config/official_sources.dart';
-import 'package:streambox/core/config/production_gateway.dart';
 import 'package:streambox/core/network/bounded_response.dart';
 import 'package:streambox/core/network/url_policy.dart';
 import 'package:streambox/data/local/source_storage.dart';
@@ -76,55 +75,31 @@ void main() {
       );
       expect(site.key, url.hashCode.toString());
     }
-    final restored = published.config.sites.where((s) => s.isBridge);
-    expect(restored.map((s) => s.key), [
-      'bridge_jianpian',
-      'bridge_ikanbot',
-      'bridge_ysj',
-    ]);
-    expect(restored.every((s) => s.isSupported), isTrue);
+    expect(published.config.sites.any((s) => s.retiredBridge), isFalse);
+    expect(
+      published.config.sites.any((s) => Uri.parse(s.api).port == 9978),
+      isFalse,
+    );
   });
 
-  test('生产片源同属官方列表，保留首页、启停、缓存和历史身份', () async {
-    await start();
-    await library.selectHome(library.state.allSites.first);
-    const production = '${ProductionGateway.url}/api/jianpian';
-    adapter.body = jsonEncode([
-      _arraySite('a', _apiA),
-      _arraySite('bridge_jianpian', production),
-    ]);
-    await library.refresh(_url);
-    expect(library.state.groups.keys, [_url]);
-    expect(library.state.homeIdentity, _apiA);
-    final restored = library.state.allSites.last;
-    expect(restored.key, 'bridge_jianpian');
-    expect(restored.isBridge, isTrue);
-    await library.selectHome(restored);
-    await library.setEnabled(restored, false);
-
-    library.dispose();
-    adapter.status = 503;
-    library = SourceLibraryNotifier(storage, parser);
-    await start();
-    expect(library.state.allSites.last.isBridge, isTrue);
-    expect(library.state.allSites.last.isEnabled, isFalse);
-    expect(library.state.homeIdentity, production);
-
-    adapter.status = 200;
-    adapter.body = jsonEncode([
-      {
-        ..._arraySite('bridge_jianpian', production, enabled: false),
-        'searchable': false,
-      },
-    ]);
-    await library.refresh(_url);
-    await library.setEnabled(library.state.allSites.single, true);
-    expect(library.state.activeSites, isEmpty);
-    expect(library.state.allSites.single.searchable, isFalse);
-    adapter.body = '[]';
-    await library.refresh(_url);
-    expect(library.state.allSites, isEmpty, reason: '生产片源也由官方 JSON 管理，不另补内置列表');
-  });
+  test(
+    'old official Bridge rows are retired without dropping CMS rows',
+    () async {
+      await start();
+      adapter.body = jsonEncode([
+        _arraySite('a', _apiA),
+        _arraySite('bridge_jianpian', 'http://1.14.171.39:9978/api/jianpian'),
+      ]);
+      await library.refresh(_url);
+      expect(library.state.activeSites.map((s) => s.api), [_apiA]);
+      expect(storage.getOfficialSnapshot()!.catalog.config.sites, hasLength(1));
+      library.dispose();
+      adapter.status = 503;
+      library = SourceLibraryNotifier(storage, parser);
+      await start();
+      expect(library.state.activeSites.map((s) => s.api), [_apiA]);
+    },
+  );
 
   test('上传的 15 条数组片源可同步，HTTP 行不阻塞整份配置且重启可恢复', () async {
     adapter.body = File(
@@ -169,6 +144,51 @@ void main() {
     expect(
       storage.getOfficialSnapshot()!.catalog.toJson(),
       snapshot.catalog.toJson(),
+    );
+  });
+
+  test('线上 28 条含重复记录的配置可首次同步，合并后离线恢复 23 个 CMS', () async {
+    adapter.body = File(
+      'test/fixtures/official_sources_duplicates.json',
+    ).readAsStringSync();
+    await start();
+    expect(library.state.groups[_url]!.error, isNull);
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+    expect(library.state.allSites, hasLength(23));
+    expect(library.state.activeSites, hasLength(22));
+    for (final name in ['红牛资源', '暴风资源']) {
+      expect(library.state.allSites.where((s) => s.name == name), hasLength(1));
+    }
+    final baofeng = library.state.allSites.singleWhere((s) => s.name == '暴风资源');
+    expect(baofeng.key, SourceStorage.builtInUrls.first.hashCode.toString());
+    final snapshot = storage.getOfficialSnapshot()!;
+    expect(snapshot.catalog.toJson() as List, hasLength(23));
+    library.dispose();
+    adapter.status = 503;
+    library = SourceLibraryNotifier(storage, parser);
+    await start();
+    expect(library.state.allSites, hasLength(23));
+    expect(library.state.groups[_url]!.needsInitialSync, isFalse);
+  });
+
+  test('数组中无冲突的相同 CMS 接口保留首条身份，重复不改变内容版本', () {
+    final first = _arraySite('a', _apiA);
+    final original = OfficialSourceCatalog.fromJson([first]);
+    final repeated = OfficialSourceCatalog.fromJson([
+      first,
+      first,
+      _arraySite('alias', '$_apiA/'),
+    ]);
+    expect(repeated.config.sites, hasLength(1));
+    expect(repeated.config.sites.single.key, original.config.sites.single.key);
+    expect(repeated.version, original.version);
+    expect(
+      () => OfficialSourceCatalog.fromJson([
+        first,
+        _arraySite('alias', _apiA),
+        _arraySite('alias', _apiB),
+      ]),
+      throwsFormatException,
     );
   });
 
@@ -296,7 +316,9 @@ void main() {
       ])
         _arraySite('b', url),
       _arraySite('a', _apiB),
-      _arraySite('b', '$_apiA/'),
+      _arraySite('b', '$_apiA/', enabled: false),
+      {..._arraySite('b', _apiA), 'searchable': false},
+      {..._arraySite('b', _apiA), 'type': 0},
     ];
     final documents = [
       for (final bad in malformed) jsonEncode([_arraySite('a', _apiA), bad]),
@@ -375,7 +397,7 @@ void main() {
       throwsFormatException,
     );
     expect(() => UrlPolicy.requireCmsApiUrl(_url), throwsFormatException);
-    expect(() => UrlPolicy.requireGatewayUrl(_url), throwsFormatException);
+    expect(() => UrlPolicy.requireConfigUrl(_url), throwsFormatException);
   });
 
   test('首次离线不注入旧内置源，联网后加载远程列表并保留自定义源', () async {

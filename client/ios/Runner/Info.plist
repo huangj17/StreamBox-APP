@@ -28,14 +28,14 @@
 		<true/>
 		<key>NSAppTransportSecurity</key>
 		<dict>
-			<!-- TVBox 媒体可用 HTTP；UrlPolicy 另允许固定官方配置及原生产 Bridge 指定 API，其余远程配置/CMS/Gateway 仍要求 HTTPS。 -->
+			<!-- 媒体可用 HTTP；UrlPolicy 另允许固定官方配置，其余远程配置和 CMS 仍要求 HTTPS。 -->
 			<key>NSAllowsArbitraryLoadsForMedia</key>
 			<true/>
 			<key>NSAllowsLocalNetworking</key>
 			<true/>
 		</dict>
 		<key>NSLocalNetworkUsageDescription</key>
-		<string>StreamBox 需要连接局域网中的 JAR Bridge 来发现片源和播放内容。</string>
+		<string>StreamBox 需要访问你添加的局域网配置地址。</string>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

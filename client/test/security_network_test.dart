@@ -8,17 +8,17 @@ import 'package:streambox/data/models/source_config.dart';
 
 void main() {
   group('URL policy', () {
-    test('remote configuration and gateway require HTTPS', () {
+    test('remote configuration requires HTTPS', () {
       expect(
         () => UrlPolicy.requireConfigUrl('http://example.com/config.json'),
         throwsFormatException,
       );
       expect(
-        () => UrlPolicy.requireGatewayUrl('http://192.168.1.10:9978'),
+        () => UrlPolicy.requireConfigUrl('http://192.168.1.10:9978'),
         throwsFormatException,
       );
       expect(
-        UrlPolicy.requireGatewayUrl('http://127.0.0.1:9978').host,
+        UrlPolicy.requireConfigUrl('http://127.0.0.1:9978').host,
         '127.0.0.1',
       );
     });

@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_typography.dart';
 import '../../core/platform/platform_service.dart';
 import '../../core/network/url_policy.dart';
+import '../../core/network/source_error_message.dart';
 import '../../data/local/source_storage.dart';
 import '../../data/models/site.dart';
 import '../../data/models/source_health.dart';
@@ -78,24 +79,28 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     if (mounted) _addFocus.requestFocus();
     if (!mounted || url == null || url.isEmpty) return;
     try {
-      if (SourceParser.isJarBridgeUrl(url)) {
-        UrlPolicy.requireGatewayUrl(url);
-      } else if (SourceParser.isCmsApiUrl(url)) {
-        UrlPolicy.requireCmsApiUrl(
-          url,
-          allowLoopback: SourceParser.isJarBridgePluginUrl(url),
-        );
+      if (SourceParser.isCmsApiUrl(url)) {
+        UrlPolicy.requireCmsApiUrl(url);
       } else {
+        if (UrlPolicy.isRetiredBridgeUrl(url)) {
+          throw const FormatException(
+            '旧 JAR Bridge 已停用，请在 Android 上导入原始 TVBox 配置',
+          );
+        }
         UrlPolicy.requireConfigUrl(url);
       }
       setState(() => _loading = true);
       await ref.read(sourceLibraryProvider.notifier).add(url);
       if (!mounted) return;
       final group = ref.read(sourceLibraryProvider).groups[url];
-      setState(() => _selectedGroup = url);
-      _setStatus(group?.error ?? '配置源已添加', error: group?.error != null);
+      setState(() {
+        _selectedGroup = url;
+        _statusMessage = null;
+      });
+      // A failed group already shows its error beside the retry action.
+      if (group?.error == null) _setStatus('配置源已添加');
     } catch (error) {
-      _setStatus('添加失败：$error', error: true);
+      _setStatus('添加失败：${sourceErrorMessage(error)}', error: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -118,36 +123,47 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
     final entryFocus = widget.entryFocusNode ?? _groupFocus;
     final body = LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 620;
+        final compact = !PlatformService.isTv && constraints.maxWidth < 620;
         final header = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 24,
-              runSpacing: 16,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('片源管理', style: AppTypography.headline1),
-                    const SizedBox(height: 6),
-                    Text('选择首页内容，管理搜索范围', style: AppTypography.body),
-                  ],
-                ),
-                _SourceButton(
-                  label: _loading ? '正在添加…' : '添加配置源',
-                  icon: Icons.add_rounded,
-                  primary: true,
-                  focusNode: _addFocus,
-                  onActivate: _loading ? null : _openAddSourceDialog,
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
+            if (!compact)
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 24,
+                runSpacing: 16,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('片源管理', style: AppTypography.headline1),
+                      const SizedBox(height: 6),
+                      Text('选择首页内容，管理搜索范围', style: AppTypography.body),
+                    ],
+                  ),
+                  _SourceButton(
+                    label: _loading ? '正在添加…' : '添加配置源',
+                    icon: Icons.add_rounded,
+                    primary: true,
+                    focusNode: _addFocus,
+                    onActivate: _loading ? null : _openAddSourceDialog,
+                  ),
+                ],
+              ),
+            if (!compact) const SizedBox(height: 20),
             _SourceOverview(home: home, enabled: library.activeSites.length),
-            const SizedBox(height: 20),
+            if (compact) ...[
+              const SizedBox(height: 12),
+              _SourceButton(
+                label: _loading ? '正在添加…' : '添加配置源',
+                icon: Icons.add_rounded,
+                primary: true,
+                focusNode: _addFocus,
+                onActivate: _loading ? null : _openAddSourceDialog,
+              ),
+            ],
+            SizedBox(height: compact ? 16 : 20),
             // Eager children keep off-screen groups reachable with a D-pad.
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -159,7 +175,8 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                     icon: Icons.inventory_2_outlined,
                     selected: selected == null,
                     focusNode: entryFocus,
-                    autofocus: !widget.embedded,
+                    autofocus:
+                        !widget.embedded && PlatformService.needsFocusSystem,
                     onActivate: () => setState(() => _selectedGroup = null),
                   ),
                   for (final group in collections) ...[
@@ -176,7 +193,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: compact ? 16 : 20),
           ],
         );
         final contents = _SourceGroupContents(
@@ -191,32 +208,35 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
           },
           onBackToNavigation: widget.onBackToNavigation,
         );
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            compact ? 16 : 32,
-            24,
-            compact ? 16 : 32,
-            12,
-          ),
-          child: Column(
-            children: [
-              Expanded(
-                child: compact || constraints.maxHeight < 520
-                    ? SingleChildScrollView(
-                        child: Column(children: [header, contents]),
-                      )
-                    : Column(
-                        children: [
-                          header,
-                          Expanded(
-                            child: SingleChildScrollView(child: contents),
-                          ),
-                        ],
-                      ),
-              ),
-              if (!compact && PlatformService.needsFocusSystem)
-                const _RemoteHelp(),
-            ],
+        return _SourceDensity(
+          compact: compact,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 16 : 32,
+              compact ? 12 : 24,
+              compact ? 16 : 32,
+              12,
+            ),
+            child: Column(
+              children: [
+                Expanded(
+                  child: compact || constraints.maxHeight < 520
+                      ? SingleChildScrollView(
+                          child: Column(children: [header, contents]),
+                        )
+                      : Column(
+                          children: [
+                            header,
+                            Expanded(
+                              child: SingleChildScrollView(child: contents),
+                            ),
+                          ],
+                        ),
+                ),
+                if (!compact && PlatformService.needsFocusSystem)
+                  const _RemoteHelp(),
+              ],
+            ),
           ),
         );
       },

@@ -8,30 +8,44 @@ import 'package:streambox/data/repositories/home_repository.dart';
 import 'package:streambox/data/sources/cms_api.dart';
 
 void main() {
-  group('JAR Bridge identity', () {
-    test('ordinary TVBox type 4 is not treated as a reachable Bridge', () {
-      final site = Site.fromJson({
-        'key': 'jar',
-        'name': '普通 JAR',
-        'type': 4,
-        'api': 'csp_Test',
-      });
-
-      expect(site.isBridge, isFalse);
+  group('Android JAR identity', () {
+    test('csp entries never masquerade as CMS APIs', () {
+      final site = Site.fromJson(
+        {'key': 'jar', 'name': 'JAR', 'type': 3, 'api': 'csp_Test'},
+        configUrl: 'https://config.example/box.json',
+        defaultJar: './test.jar',
+      );
+      expect(site.isJar, isTrue);
       expect(SourceConfig(sites: [site]).cmsSites, isEmpty);
     });
-
-    test('only sites discovered from Bridge carry Bridge identity', () {
-      final site = Site.fromBridge(
-        bridgeUrl: 'http://127.0.0.1:9978',
-        key: 'test',
-        name: 'Test',
-        apiPath: '/api/test',
-      );
-
-      expect(site.isBridge, isTrue);
-      expect(site.api, 'http://127.0.0.1:9978/api/test');
+    test('cached remote Bridge metadata is retired', () {
+      final site = Site.fromCache({
+        'key': 'old',
+        'name': 'Old',
+        'type': 3,
+        'api': 'https://old.example/api/test',
+        'gatewayUrl': 'https://old.example',
+      });
+      expect(site.isVisible, isFalse);
+      expect(site.isSupported, isFalse);
     });
+  });
+
+  test('native initialization errors reach the TV retry state', () async {
+    final site = Site.fromJson(
+      {'key': 'jar', 'name': 'JAR', 'api': 'csp_Test', 'type': 3},
+      configUrl: 'https://config.example/box.json',
+      defaultJar: './p.jar',
+    );
+    await expectLater(
+      HomeRepository(_FailingApi()).getCategories([site]),
+      throwsFormatException,
+    );
+    final cms = Site.fromUrl('https://cms.example/api.php');
+    expect(
+      (await HomeRepository(_FailingApi()).getCategories([cms])).single.type,
+      CategoryType.fixed,
+    );
   });
 
   test('parse flag and source flag stay aligned after quality sorting', () {
@@ -113,4 +127,15 @@ class _FakeCmsApi extends CmsApi {
     Site site, {
     CancelToken? cancelToken,
   }) async => categories[site.key] ?? const [];
+}
+
+class _FailingApi extends CmsApi {
+  _FailingApi() : super(Dio());
+  @override
+  Future<List<Category>> fetchCategories(
+    Site site, {
+    CancelToken? cancelToken,
+  }) async {
+    throw const FormatException('插件缺少所需宿主组件');
+  }
 }

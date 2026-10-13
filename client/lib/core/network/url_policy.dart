@@ -1,6 +1,5 @@
 import 'dart:io';
 import '../config/official_sources.dart';
-import '../config/production_gateway.dart';
 
 /// Untrusted configuration and CMS responses must not select arbitrary local
 /// files/protocol handlers or literal private-network endpoints.
@@ -34,17 +33,11 @@ class UrlPolicy {
     throw const FormatException('配置源必须使用 HTTPS；仅本机地址允许 HTTP');
   }
 
-  static Uri requireGatewayUrl(String raw) {
-    final uri = _parse(raw);
-    if (ProductionGateway.isRoot(uri)) return uri;
-    if (uri.scheme == 'https') return uri;
-    if (uri.scheme == 'http' && _isLoopbackHost(uri.host)) return uri;
-    throw const FormatException('远程 Gateway 必须使用 HTTPS');
-  }
-
   static Uri requireCmsApiUrl(String raw, {bool allowLoopback = false}) {
     final uri = _parse(raw);
-    if (ProductionGateway.isApi(uri)) return uri;
+    if (isRetiredBridgeUrl(raw)) {
+      throw const FormatException('旧 JAR Bridge 已停用，请在 Android 上导入原始 TVBox 配置');
+    }
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       throw const FormatException('CMS API 只允许 HTTP(S) 地址');
     }
@@ -75,10 +68,43 @@ class UrlPolicy {
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       throw const FormatException('播放地址只允许 HTTP(S) 协议');
     }
-    if (_isPrivateLiteral(uri.host)) {
+    if ((_isPrivateLiteral(uri.host) || _isLoopbackHost(uri.host)) &&
+        !_isAndroidProxy(uri)) {
       throw const FormatException('播放地址不允许访问本机或私网地址');
     }
     return uri;
+  }
+
+  // Only the origin and token path supplied by the native Android host are
+  // eligible. Imported configurations cannot grant themselves loopback access.
+  static Uri? _androidProxy;
+  static void registerAndroidProxy(String raw) {
+    final uri = _parse(raw);
+    if (uri.scheme != 'http' ||
+        uri.host != '127.0.0.1' ||
+        uri.port < 1024 ||
+        !RegExp(r'^/spider/[a-f0-9]{32}/$').hasMatch(uri.path) ||
+        uri.hasQuery) {
+      throw const FormatException('Android 插件代理地址无效');
+    }
+    _androidProxy = uri;
+  }
+
+  static void clearAndroidProxy() => _androidProxy = null;
+  static bool _isAndroidProxy(Uri uri) {
+    final origin = _androidProxy;
+    return origin != null &&
+        uri.scheme == origin.scheme &&
+        uri.host == origin.host &&
+        uri.port == origin.port &&
+        uri.path.startsWith(origin.path);
+  }
+
+  static bool isRetiredBridgeUrl(String raw) {
+    final uri = Uri.tryParse(raw);
+    return uri != null &&
+        uri.port == 9978 &&
+        (uri.path.isEmpty || uri.path == '/' || uri.path.startsWith('/api/'));
   }
 
   static bool isSafeCmsApi(String raw) {

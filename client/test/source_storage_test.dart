@@ -196,15 +196,11 @@ void main() {
       'https://collect.wolongzyw.com/api.php/provide/vod/',
       'https://api.apibdzy.com/api.php/provide/vod/',
       'https://jyzyapi.com/api.php/provide/vod/',
-      'http://127.0.0.1:9978',
-      'http://localhost:9978',
-      'https://custom-bridge.example:9978',
       'https://timeout.example/config.json',
     ];
     for (final url in [...SourceStorage.builtInUrls, ...customUrls]) {
       await storage.add(url);
       await storage.setSelectedWarehouse(url, 'https://warehouse.example');
-      await storage.setSelectedBridgePlugin(url, 'plugin');
     }
     await storage.setSelected(customUrls.first);
 
@@ -217,7 +213,6 @@ void main() {
     expect(storage.getSelected(), customUrls.first);
     for (final url in customUrls) {
       expect(storage.getSelectedWarehouse(url), 'https://warehouse.example');
-      expect(storage.getSelectedBridgePlugin(url), 'plugin');
     }
   });
 
@@ -255,6 +250,26 @@ void main() {
     ]);
   });
 
+  test(
+    'upgrade retires Bridge subscriptions without deleting custom configurations',
+    () async {
+      const old = 'http://127.0.0.1:9978';
+      const keep = 'https://config.example/box.json';
+      await storage.add(old);
+      await storage.add(keep);
+      await storage.setSelected(old);
+      await storage.setHomeSite('$old/api/test');
+      await Hive.box<String>('source_urls').put('_bp:$old', 'old-plugin');
+      await Hive.box<String>('source_urls').delete('_android_jar_migrated_v1');
+      await Hive.close();
+      await storage.init();
+      expect(storage.getAll(), [keep]);
+      expect(storage.getSelected(), isNull);
+      expect(storage.getHomeSite(), isNull);
+      expect(Hive.box<String>('source_urls').get('_bp:$old'), isNull);
+    },
+  );
+
   test('删除源时清理选中状态、仓库及插件记录，重启后不再恢复', () async {
     const removed = 'https://removed.example/config.json';
     const retained = 'https://retained.example/config.json';
@@ -263,7 +278,7 @@ void main() {
     await Hive.box<String>('source_urls').add(removed);
     await storage.add(retained);
     await storage.setSelectedWarehouse(removed, 'https://warehouse.example');
-    await storage.setSelectedBridgePlugin(removed, 'plugin');
+    await Hive.box<String>('source_urls').put('_bp:$removed', 'plugin');
 
     await storage.remove(removed);
     await Hive.close();
@@ -272,6 +287,6 @@ void main() {
     expect(storage.getAll(), [retained]);
     expect(storage.getSelected(), isNull);
     expect(storage.getSelectedWarehouse(removed), isNull);
-    expect(storage.getSelectedBridgePlugin(removed), isNull);
+    expect(Hive.box<String>('source_urls').get('_bp:$removed'), isNull);
   });
 }

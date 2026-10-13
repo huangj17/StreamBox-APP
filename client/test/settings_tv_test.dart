@@ -539,14 +539,79 @@ void main() {
         settings: false,
         textScale: 1.3,
       );
-      await tester.ensureVisible(find.text('详情'));
+      await tester.ensureVisible(find.byTooltip('同步详情'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('详情'));
+      await tester.tap(find.byTooltip('同步详情'));
       await tester.pumpAndSettle();
       expect(find.text('同步详情'), findsOneWidget);
       expect(find.textContaining(SourceStorage.officialUrl), findsOneWidget);
       await key(tester, LogicalKeyboardKey.escape);
       expect(focus(), 'source-sync-details');
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'TV: custom source DNS diagnostics support D-pad reading and return focus',
+    (tester) async {
+      final details = List.filled(
+        30,
+        'DioException: Failed host lookup: config.example',
+      ).join('\n');
+      library.replace(
+        SourceLibrary(
+          groups: {
+            _collection: SourceGroup(
+              url: _collection,
+              error: '加载失败：无法解析域名 config.example，请检查网络后重试',
+              errorDetails: details,
+            ),
+          },
+        ),
+      );
+      await pumpPage(tester, size: const Size(960, 540));
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.select);
+      expect(find.textContaining('无法解析域名'), findsOneWidget);
+      expect(find.textContaining('DioException'), findsNothing);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.arrowLeft);
+      await key(tester, LogicalKeyboardKey.arrowLeft);
+      expect(focus(), 'source-sync-details');
+      await key(tester, LogicalKeyboardKey.select);
+      expect(focus(), 'source-sync-reader');
+      expect(find.textContaining(details), findsOneWidget);
+      final scroll = tester
+          .widget<SingleChildScrollView>(
+            find.descendant(
+              of: find.byType(Dialog),
+              matching: find.byType(SingleChildScrollView),
+            ),
+          )
+          .controller!;
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(scroll.position.pixels, greaterThan(0));
+      await key(tester, LogicalKeyboardKey.gameButtonB);
+      expect(focus(), 'source-sync-details');
+      await key(tester, LogicalKeyboardKey.select);
+      library.replace(
+        SourceLibrary(
+          groups: {
+            _collection: SourceGroup(
+              url: _collection,
+              config: SourceConfig(sites: []),
+            ),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(focus(), 'source-sync-reader');
+      await key(tester, LogicalKeyboardKey.gameButtonB);
+      expect(focus(), 'source-update');
+      await key(tester, LogicalKeyboardKey.escape);
+      expect(focus(), 'settings-nav-source');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -858,9 +923,9 @@ void main() {
         textScale: 1.3,
       );
       expect(find.textContaining('尚未同步'), findsOneWidget);
-      await tester.ensureVisible(find.text('立即更新'));
+      await tester.ensureVisible(find.byKey(const ValueKey('source-refresh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('立即更新'));
+      await tester.tap(find.byKey(const ValueKey('source-refresh')));
       await tester.pumpAndSettle();
       expect(library.officialUpdateRequests, 1);
       expect(find.textContaining('同步失败，暂无缓存'), findsOneWidget);

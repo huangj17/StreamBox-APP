@@ -61,7 +61,7 @@ final searchSitesProvider = Provider<List<Site>>((ref) {
 
 /// 首页只请求一个站点；当前源异常时优先使用检测通过的备用源。
 final _homeSelectionProvider =
-    Provider<({String key, String api, String name})?>((ref) {
+    Provider<({String key, String api, String name, String runtime})?>((ref) {
       final sites = ref.watch(sitesProvider);
       final health = ref.watch(sourceHealthProvider);
       final preferred = ref.watch(
@@ -79,7 +79,12 @@ final _homeSelectionProvider =
               )
               .firstOrNull ??
           eligible.first;
-      return (key: site.key, api: site.api, name: site.name);
+      return (
+        key: site.key,
+        api: site.api,
+        name: site.name,
+        runtime: jsonEncode(site.isJar ? site.toJson() : site.headers),
+      );
     });
 
 final homeSitesProvider = Provider<List<Site>>((ref) {
@@ -129,10 +134,7 @@ final bannerItemsProvider = FutureProvider<List<VideoItem>>((ref) async {
   }
 });
 
-/// 全局 rail fetch 并发闸：Bridge 后端 spider 单线程串行（每 plugin 一个
-/// `Executors.newSingleThreadExecutor`），首页同时 N 个 rail 起飞会让 spider
-/// 队列爆掉，排尾的命中 client 8s receiveTimeout fail。限到 4 并发后排队，
-/// 单 rail 看起来稍慢但成功率显著上升。
+/// Limit simultaneous list requests and Android plugin queues.
 final _railSemaphore = _AsyncSemaphore(4);
 
 /// 每个分类行的内容（family：会话级缓存，避免滚动时重复请求导致数据错乱）

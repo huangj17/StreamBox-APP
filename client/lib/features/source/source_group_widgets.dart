@@ -42,7 +42,14 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       context: context,
       builder: (_) => _SourceSyncDetails(url: group.url),
     );
-    if (mounted) _detailsFocus.requestFocus();
+    if (mounted) {
+      final current = ref.read(sourceLibraryProvider).groups[group.url];
+      if (SourceStorage.isBuiltIn(group.url) || current?.error != null) {
+        _detailsFocus.requestFocus();
+      } else {
+        _updateFocus.requestFocus();
+      }
+    }
   }
 
   Future<void> _remove(SourceGroup group) async {
@@ -82,6 +89,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = _sourceCompact(context);
     final library = ref.watch(sourceLibraryProvider);
     final health = ref.watch(sourceHealthProvider);
     final home = ref.watch(homeSitesProvider).firstOrNull;
@@ -91,7 +99,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
     final seen = <String>{};
     final sites = widget.groups
         .expand((group) => group.config?.sites ?? <Site>[])
-        .where((site) => seen.add(site.identity))
+        .where((site) => site.isVisible && seen.add(site.identity))
         .map((site) => canonical[site.identity] ?? site)
         .toList();
     final group = widget.groups.firstOrNull;
@@ -112,54 +120,118 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 16,
-          runSpacing: 12,
-          children: [
-            Text('${sites.length} 个片源', style: AppTypography.title),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (builtIn && group != null)
-                  _SourceButton(
-                    focusNode: _detailsFocus,
-                    label: '详情',
-                    icon: Icons.info_outline_rounded,
-                    onActivate: () => _showSyncDetails(group),
-                  ),
-                _SourceButton(
-                  label: widget.checking ? '检测中…' : '检测全部',
-                  icon: Icons.refresh_rounded,
-                  onActivate: widget.checking ? null : widget.onCheck,
+        if (compact) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${sites.length} 个片源',
+                  style: _sourceTitle(context),
                 ),
-                if (group != null)
-                  _SourceButton(
+              ),
+              if (group != null && (builtIn || group.error != null))
+                IconButton(
+                  focusNode: _detailsFocus,
+                  tooltip: builtIn ? '同步详情' : '错误详情',
+                  icon: const Icon(Icons.info_outline_rounded, size: 22),
+                  onPressed: () => _showSyncDetails(group),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (group != null)
+                Expanded(
+                  child: _SourceButton(
+                    key: const ValueKey('source-refresh'),
                     focusNode: _updateFocus,
                     label: loading
                         ? '更新中…'
+                        : group.needsInitialSync && group.error != null
+                        ? '重试更新'
                         : builtIn
-                        ? '立即更新'
+                        ? '更新片源'
                         : '更新配置',
                     icon: Icons.sync_rounded,
+                    primary: group.needsInitialSync && group.error != null,
                     onActivate: loading
                         ? null
                         : () => ref
                               .read(sourceLibraryProvider.notifier)
                               .refresh(group.url),
                   ),
-                if (!builtIn)
-                  _SourceButton(
-                    label: '移除',
-                    icon: Icons.delete_outline_rounded,
-                    onActivate: () => _remove(group),
+                ),
+              if (sites.isNotEmpty) ...[
+                if (group != null) const SizedBox(width: 8),
+                Expanded(
+                  child: _SourceButton(
+                    label: widget.checking ? '检测中…' : '检测全部',
+                    icon: Icons.refresh_rounded,
+                    onActivate: widget.checking ? null : widget.onCheck,
                   ),
+                ),
               ],
-            ),
-          ],
-        ),
+              if (!builtIn) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: '移除配置源',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _remove(group),
+                ),
+              ],
+            ],
+          ),
+        ] else
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            runSpacing: 12,
+            children: [
+              Text('${sites.length} 个片源', style: AppTypography.title),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (group != null && (builtIn || group.error != null))
+                    _SourceButton(
+                      focusNode: _detailsFocus,
+                      label: builtIn ? '详情' : '错误详情',
+                      icon: Icons.info_outline_rounded,
+                      onActivate: () => _showSyncDetails(group),
+                    ),
+                  _SourceButton(
+                    label: widget.checking ? '检测中…' : '检测全部',
+                    icon: Icons.refresh_rounded,
+                    onActivate: widget.checking ? null : widget.onCheck,
+                  ),
+                  if (group != null)
+                    _SourceButton(
+                      key: const ValueKey('source-refresh'),
+                      focusNode: _updateFocus,
+                      label: loading
+                          ? '更新中…'
+                          : builtIn
+                          ? '立即更新'
+                          : '更新配置',
+                      icon: Icons.sync_rounded,
+                      onActivate: loading
+                          ? null
+                          : () => ref
+                                .read(sourceLibraryProvider.notifier)
+                                .refresh(group.url),
+                    ),
+                  if (!builtIn)
+                    _SourceButton(
+                      label: '移除',
+                      icon: Icons.delete_outline_rounded,
+                      onActivate: () => _remove(group),
+                    ),
+                ],
+              ),
+            ],
+          ),
         if (builtIn && group != null) ...[
           const SizedBox(height: 10),
           _SourceSyncSummary(group: group),
@@ -169,7 +241,9 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
             padding: const EdgeInsets.only(top: 12),
             child: Text(
               _error ?? errors.join('\n'),
-              style: AppTypography.body.copyWith(color: AppColors.warning),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: _sourceBody(context).copyWith(color: AppColors.warning),
             ),
           ),
         if (group != null && group.warehouses.isNotEmpty) ...[
@@ -202,9 +276,16 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           ),
           const SizedBox(height: 10),
         ],
-        if (visible.isEmpty)
+        if (visible.isEmpty &&
+            (builtIn ||
+                loading ||
+                errors.isEmpty ||
+                group.warehouses.isNotEmpty))
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 16 : 24,
+              vertical: compact ? 24 : 32,
+            ),
             decoration: BoxDecoration(
               color: AppColors.cardBackground,
               borderRadius: BorderRadius.circular(16),
@@ -227,27 +308,33 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                       : group?.warehouses.isNotEmpty == true
                       ? '选择一个仓库，查看其中的片源'
                       : group?.needsInitialSync == true
-                      ? '尚未获取官方片源，请选择「立即更新」'
+                      ? compact
+                            ? group?.error != null
+                                  ? '官方片源暂未加载，请重试更新或添加配置源'
+                                  : '更新官方片源后即可开始观看'
+                            : '尚未获取官方片源，请选择「立即更新」'
                       : '这里还没有片源',
                   textAlign: TextAlign.center,
-                  style: AppTypography.body,
+                  style: _sourceBody(context),
                 ),
                 if (!loading && group == null)
                   const Text('使用上方「添加配置源」开始', style: AppTypography.body),
               ],
             ),
           ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: _SourceButton(
-            focusNode: _filterFocus,
-            label: _showProblems ? '显示全部片源' : '异常片源（${problems.length}）',
-            icon: _showProblems ? Icons.list_rounded : Icons.tune_rounded,
-            selected: _showProblems,
-            onActivate: () => setState(() => _showProblems = !_showProblems),
+        if (!compact || sites.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _SourceButton(
+              focusNode: _filterFocus,
+              label: _showProblems ? '显示全部片源' : '异常片源（${problems.length}）',
+              icon: _showProblems ? Icons.list_rounded : Icons.tune_rounded,
+              selected: _showProblems,
+              onActivate: () => setState(() => _showProblems = !_showProblems),
+            ),
           ),
-        ),
+        ],
         const SizedBox(height: 16),
       ],
     );
@@ -337,6 +424,7 @@ class _SiteRowState extends State<_SiteRow> {
   @override
   Widget build(BuildContext context) {
     final site = widget.site;
+    final compact = _sourceCompact(context);
     return Focus(
       canRequestFocus: false,
       onKeyEvent: (_, event) {
@@ -364,7 +452,7 @@ class _SiteRowState extends State<_SiteRow> {
           onActivate: _manage,
           builder: (context, focused) => AnimatedContainer(
             duration: const Duration(milliseconds: 140),
-            padding: const EdgeInsets.all(14),
+            padding: EdgeInsets.all(compact ? 12 : 14),
             decoration: BoxDecoration(
               color: focused
                   ? const Color(0xFF303036)
@@ -382,8 +470,8 @@ class _SiteRowState extends State<_SiteRow> {
             child: Row(
               children: [
                 Container(
-                  width: 48,
-                  height: 48,
+                  width: compact ? 38 : 48,
+                  height: compact ? 38 : 48,
                   decoration: BoxDecoration(
                     color: widget.home
                         ? AppColors.netflixRed.withAlpha(30)
@@ -398,7 +486,7 @@ class _SiteRowState extends State<_SiteRow> {
                     size: 25,
                   ),
                 ),
-                const SizedBox(width: 16),
+                SizedBox(width: compact ? 12 : 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,7 +495,7 @@ class _SiteRowState extends State<_SiteRow> {
                         site.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTypography.title.copyWith(
+                        style: _sourceTitle(context).copyWith(
                           color: AppColors.primaryText,
                           fontWeight: FontWeight.w600,
                         ),
@@ -420,6 +508,11 @@ class _SiteRowState extends State<_SiteRow> {
                         children: [
                           if (!site.isSupported)
                             const _InfoChip('暂不兼容', AppColors.warning)
+                          else if (site.isJar)
+                            const _InfoChip(
+                              'Android 本机插件',
+                              AppColors.secondaryText,
+                            )
                           else
                             SourceHealthBadge(
                               widget.health ??
@@ -434,7 +527,7 @@ class _SiteRowState extends State<_SiteRow> {
                                 ? '已启用'
                                 : '已停用',
                             style: AppTypography.caption.copyWith(
-                              fontSize: 16,
+                              fontSize: compact ? 13 : 16,
                               color: widget.home
                                   ? const Color(0xFFFF7079)
                                   : AppColors.secondaryText,
@@ -524,6 +617,8 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
           ? '该片源已由官方停用，后续配置恢复后可继续使用'
           : !site.isSupported
           ? '该接口格式或协议暂不支持'
+          : site.isJar
+          ? '由当前 Android 设备运行，选择内容时加载插件'
           : health?.message ?? '尚未检测，可以先检测片源是否可用',
       children: [
         _SourceButton(
@@ -559,7 +654,8 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
               ? '检测中…'
               : '重新检测',
           icon: Icons.refresh_rounded,
-          onActivate: !site.isSupported || (health?.isPending ?? false)
+          onActivate:
+              site.isJar || !site.isSupported || (health?.isPending ?? false)
               ? null
               : () => ref.read(sourceHealthProvider.notifier).refreshUrls([
                   site.api,

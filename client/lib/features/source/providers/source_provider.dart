@@ -62,7 +62,7 @@ final sourceHealthProvider =
 final sourceHealthUrlsProvider = Provider<List<String>>((ref) {
   final library = ref.watch(sourceLibraryProvider);
   return library.allSites
-      .where((s) => s.isSupported)
+      .where((s) => s.isSupported && !s.isJar)
       .map((s) => s.api)
       .toSet()
       .toList();
@@ -255,7 +255,7 @@ final sourceDocumentProvider = FutureProvider<ParsedSourceDocument?>((
 ) async {
   final url = ref.watch(selectedSourceUrlProvider);
   if (url == null || url.isEmpty) return null;
-  if (SourceParser.isCmsApiUrl(url) || SourceParser.isJarBridgeUrl(url)) {
+  if (SourceParser.isCmsApiUrl(url)) {
     return null;
   }
   return ref.read(sourceParserProvider).parseDocument(url);
@@ -266,7 +266,6 @@ final warehouseListProvider = FutureProvider<List<Warehouse>>((ref) async {
   final url = ref.watch(selectedSourceUrlProvider);
   if (url == null || url.isEmpty) return [];
   if (SourceParser.isCmsApiUrl(url)) return [];
-  if (SourceParser.isJarBridgeUrl(url)) return [];
 
   final document = await ref.watch(sourceDocumentProvider.future);
   return document?.warehouses ?? [];
@@ -274,52 +273,16 @@ final warehouseListProvider = FutureProvider<List<Warehouse>>((ref) async {
 
 // ── 配置源解析 ──
 
-/// 本地 Bridge 自动覆盖：远程 Bridge URL 在本地 Bridge 起着时（500ms 内 /health
-/// 200）改用 `http://localhost:9978`。开发/调试无需手动改源 URL。
-///
-/// 不污染 storage（用户保存的远程 URL 保留），仅 runtime 切换。
-Future<String> _preferLocalBridge(String url, Dio dio) async {
-  if (!url.contains(':9978')) return url; // 非 Bridge
-  if (url.contains('localhost') || url.contains('127.0.0.1')) return url;
-  try {
-    final r = await dio.get<dynamic>(
-      'http://localhost:9978/health',
-      options: Options(
-        receiveTimeout: const Duration(milliseconds: 500),
-        sendTimeout: const Duration(milliseconds: 500),
-      ),
-    );
-    if (r.statusCode == 200) return 'http://localhost:9978';
-  } catch (_) {
-    // 本地没起，回退原远程
-  }
-  return url;
-}
-
 /// 当前选中配置源的解析结果
-/// 支持四种情况：JAR Bridge URL、直接 CMS API URL、单仓 JSON、多仓 JSON
+/// 直接 CMS API、TVBox 单仓 JSON、或多仓 JSON。
 final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
   final raw = ref.watch(selectedSourceUrlProvider);
   if (raw == null || raw.isEmpty) return null;
 
   final parser = ref.read(sourceParserProvider);
 
-  // 远程 Bridge → 优先用本地 Bridge（如果起着）
-  final url = SourceParser.isJarBridgeUrl(raw)
-      ? await _preferLocalBridge(raw, ref.read(dioProvider))
-      : raw;
-
-  // 直接 CMS API URL → 包装为单站点
-  if (SourceParser.isCmsApiUrl(url)) {
-    return SourceParser.wrapCmsUrl(url);
-  }
-
-  // 明确 Bridge 或无路径 HTTPS 根地址才探测 Gateway Schema。普通配置文件
-  // 路径直接解析，避免无意义的 /api/list 请求。
-  if (SourceParser.shouldProbeGateway(url)) {
-    final gateway = await parser.probeGateway(url);
-    if (gateway != null) return gateway;
-  }
+  final url = raw;
+  if (SourceParser.isCmsApiUrl(url)) return SourceParser.wrapCmsUrl(url);
 
   // 单仓/多仓共享同一份已下载文档。
   final document = await ref.watch(sourceDocumentProvider.future);
@@ -340,16 +303,13 @@ final sourceConfigProvider = FutureProvider<SourceConfig?>((ref) async {
   return document?.config;
 });
 
-/// 当前可用的站点列表（CMS 站点 + Bridge 站点）
+/// 当前设备可用站点：全平台 CMS，Android 本机 JAR。
 final availableSitesProvider = Provider<List<Site>>((ref) {
   final configAsync = ref.watch(sourceConfigProvider);
   return configAsync.whenOrNull(
         data: (config) {
           if (config == null) return <Site>[];
-          final cmsSites = config.cmsSites.toSet();
-          return config.sites
-              .where((site) => site.isBridge || cmsSites.contains(site))
-              .toList();
+          return config.sites.where((site) => site.isSupported).toList();
         },
       ) ??
       [];

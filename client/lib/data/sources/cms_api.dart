@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
-import '../../core/config/production_gateway.dart';
 import '../../core/network/bounded_response.dart';
-import '../../core/network/gateway_auth.dart';
 import '../../core/network/url_policy.dart';
 import 'cms_xml_decoder.dart';
+import 'android_spider_client.dart';
 import '../models/site.dart';
 import '../models/category.dart';
 import '../models/video_list_result.dart';
@@ -17,33 +16,67 @@ class PlayResult {
   const PlayResult({required this.url, this.headers = const {}});
 }
 
-/// 苹果 CMS 网络请求层
+/// Unified data facade: portable CMS HTTP or Android-local Spider calls.
 class CmsApi {
   static const _maxCmsResponseBytes = 10 * 1024 * 1024;
   final Dio _dio;
 
-  CmsApi(this._dio);
+  final AndroidSpiderClient _spider;
+
+  CmsApi(this._dio, {AndroidSpiderClient? spider})
+    : _spider = spider ?? AndroidSpiderClient();
 
   Future<Map<String, dynamic>> _getJson(
-    String rawUrl, {
+    Site site, {
     Map<String, dynamic>? queryParameters,
     Duration sendTimeout = const Duration(seconds: 8),
     Duration receiveTimeout = const Duration(seconds: 8),
-    bool gateway = false,
     CancelToken? cancelToken,
   }) async {
-    final url = UrlPolicy.requireCmsApiUrl(rawUrl, allowLoopback: gateway);
+    if (site.retiredBridge) throw const FormatException('旧 JAR Bridge 已停用');
+    if (site.isJar) {
+      if (!site.isSupported) {
+        throw const FormatException('该 JAR 片源仅支持 Android 设备');
+      }
+      final q = queryParameters ?? const <String, dynamic>{};
+      final String method;
+      final Map<String, dynamic> params;
+      if (q.containsKey('wd')) {
+        method = 'search';
+        params = {'keyword': q['wd'], 'quick': false};
+      } else if (q.containsKey('ids')) {
+        method = 'detail';
+        params = {
+          'ids': [q['ids'].toString()],
+        };
+      } else if (q.containsKey('t')) {
+        method = 'category';
+        params = {
+          'tid': q['t'].toString(),
+          'page': (q['pg'] ?? 1).toString(),
+          'filter': true,
+          'extend': {if (q['year'] != null) 'year': q['year']},
+        };
+      } else {
+        method = 'home';
+        params = {'filter': true};
+      }
+      return _spider.invoke(
+        site,
+        method,
+        params: params,
+        cancelToken: cancelToken,
+      );
+    }
+    final url = UrlPolicy.requireCmsApiUrl(site.api);
     final text = await getBoundedText(
       _dio,
       url.toString(),
       queryParameters: queryParameters,
-      headers: gateway ? GatewayAuth.headersFor(url) : null,
+      headers: site.headers,
       sendTimeout: sendTimeout,
       receiveTimeout: receiveTimeout,
       cancelToken: cancelToken,
-      redirectValidator: ProductionGateway.isOrigin(url)
-          ? (next) => ProductionGateway.validateRedirect(url, next)
-          : null,
       maxBytes: _maxCmsResponseBytes,
     );
     final trimmed = text.trimLeft();
@@ -62,9 +95,8 @@ class CmsApi {
     CancelToken? cancelToken,
   }) async {
     final data = await _getJson(
-      site.api,
+      site,
       queryParameters: {'ac': 'class'},
-      gateway: site.isBridge,
       cancelToken: cancelToken,
     );
     final list = data['class'] is List ? data['class'] as List : const [];
@@ -94,11 +126,7 @@ class CmsApi {
     };
     if (year != null && year.isNotEmpty) params['year'] = year;
 
-    final data = await _getJson(
-      site.api,
-      queryParameters: params,
-      gateway: site.isBridge,
-    );
+    final data = await _getJson(site, queryParameters: params);
     return VideoListResult.fromJson(data, siteKey: site.key);
   }
 
@@ -109,9 +137,8 @@ class CmsApi {
     required String videoId,
   }) async {
     final data = await _getJson(
-      site.api,
+      site,
       queryParameters: {'ac': 'detail', 'ids': videoId},
-      gateway: site.isBridge,
     );
     final list = data['list'] is List ? data['list'] as List : const [];
     if (list.isEmpty) return null;
@@ -119,24 +146,26 @@ class CmsApi {
     if (first is! Map) return null;
     return CmsVideoDetail.fromJson(
       Map<String, dynamic>.from(first),
-      isBridge: site.isBridge,
+      isJar: site.isJar,
     );
   }
 
-  /// 调用 JAR Bridge 的 playerContent，取得真实播放地址和必须透传的请求头。
+  /// Resolve every Android plugin episode, even if its ID looks like an HTTP URL.
   Future<PlayResult> resolvePlayUrl({
     required Site site,
     required String flag,
     required String rawUrl,
   }) async {
-    if (!site.isBridge) {
-      throw ArgumentError.value(site.api, 'site', 'Site is not a JAR Bridge');
+    if (!site.isSupported) {
+      throw const FormatException('该 JAR 片源仅支持 Android 设备');
     }
-    final data = await _getJson(
-      '${site.api}/play',
-      queryParameters: {'flag': flag, 'id': rawUrl},
-      receiveTimeout: const Duration(seconds: 20),
-      gateway: true,
+    if (!site.isJar) {
+      throw ArgumentError.value(site.api, 'site', 'Not an Android JAR source');
+    }
+    final data = await _spider.invoke(
+      site,
+      'play',
+      params: {'flag': flag, 'id': rawUrl},
     );
     final parse = switch (data['parse']) {
       final num value => value.toInt(),
@@ -148,7 +177,7 @@ class CmsApi {
     }
     final rawResolvedUrl = data['url']?.toString().trim() ?? '';
     if (rawResolvedUrl.isEmpty) {
-      throw const FormatException('Bridge 未返回有效播放地址');
+      throw const FormatException('插件未返回有效播放地址');
     }
     final url = UrlPolicy.requirePlaybackUrl(rawResolvedUrl).toString();
     final header = data['header'];
@@ -160,7 +189,10 @@ class CmsApi {
             (key, value) => MapEntry(key.toString(), value.toString()),
           )
         : const <String, String>{};
-    return PlayResult(url: url, headers: headers);
+    return PlayResult(
+      url: url,
+      headers: headers.isEmpty ? site.headers : headers,
+    );
   }
 
   /// 搜索
@@ -171,9 +203,8 @@ class CmsApi {
     CancelToken? cancelToken,
   }) async {
     final data = await _getJson(
-      site.api,
+      site,
       queryParameters: {'wd': keyword},
-      gateway: site.isBridge,
       cancelToken: cancelToken,
     );
     return VideoListResult.fromJson(data, siteKey: site.key);

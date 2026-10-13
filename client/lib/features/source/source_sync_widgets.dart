@@ -30,7 +30,7 @@ class _SourceSyncSummary extends StatelessWidget {
       TextSpan(
         children: [
           TextSpan(text: status),
-          if (Uri.parse(group.url).scheme == 'http')
+          if (!_sourceCompact(context) && Uri.parse(group.url).scheme == 'http')
             const TextSpan(
               text: ' · HTTP 未加密',
               style: TextStyle(color: AppColors.warning),
@@ -40,7 +40,7 @@ class _SourceSyncSummary extends StatelessWidget {
       key: const ValueKey('source-sync-summary'),
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
-      style: AppTypography.body.copyWith(
+      style: _sourceBody(context).copyWith(
         color: group.error == null
             ? AppColors.secondaryText
             : AppColors.warning,
@@ -96,18 +96,21 @@ class _SourceSyncDetailsState extends ConsumerState<_SourceSyncDetails> {
   @override
   Widget build(BuildContext context) {
     final group = ref.watch(sourceLibraryProvider).groups[widget.url];
+    final official = widget.url == SourceStorage.officialUrl;
     final info = [
-      '配置版本：${group?.version ?? '—'}',
-      '上次同步：${_sourceSyncTime(group?.syncedAt)}',
-      '前台每 30 分钟检查，也可选择「立即更新」。',
+      if (official) ...[
+        '配置版本：${group?.version ?? '—'}',
+        '上次同步：${_sourceSyncTime(group?.syncedAt)}',
+        '前台每 30 分钟检查，也可选择「立即更新」。',
+      ],
       '配置地址：${widget.url}',
       if (Uri.parse(widget.url).scheme == 'http')
         'HTTP 明文传输，存在被篡改风险，建议服务器启用 HTTPS。',
-      if (group?.error != null) '错误详情：\n${group!.error}',
+      if (group?.error != null) '错误详情：\n${group!.errorDetails ?? group.error}',
     ].join('\n\n');
     return _SourceDialog(
-      title: '同步详情',
-      subtitle: '↑↓ 滚动 · 确认或返回关闭',
+      title: official ? '同步详情' : '错误详情',
+      subtitle: _sourceCompact(context) ? '配置状态与错误信息' : '↑↓ 滚动 · 确认或返回关闭',
       scrollController: _scroll,
       children: [
         Focus(
@@ -127,7 +130,7 @@ class _SourceSyncDetailsState extends ConsumerState<_SourceSyncDetails> {
                   width: 2,
                 ),
               ),
-              child: Text(info, style: AppTypography.body),
+              child: Text(info, style: _sourceBody(context)),
             ),
           ),
         ),

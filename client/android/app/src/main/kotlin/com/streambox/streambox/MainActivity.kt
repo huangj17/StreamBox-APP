@@ -13,6 +13,9 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        if (!flutterEngine.plugins.has(com.streambox.streambox.spider.AndroidSpiderPlugin::class.java)) {
+            flutterEngine.plugins.add(com.streambox.streambox.spider.AndroidSpiderPlugin())
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

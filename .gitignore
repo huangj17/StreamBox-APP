@@ -18,3 +18,6 @@ AGENTS.md
 *.log
 
 docs/
+
+# Retired backend local data and build caches are not part of the application.
+/jar-bridge/

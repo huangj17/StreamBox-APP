@@ -610,7 +610,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _setBuffering(true, restartIndicators: true);
     _armStuckTimer();
     try {
-      if (widget.site.isBridge && episode.requiresResolve) {
+      if (widget.site.isJar) {
         final result = await ref
             .read(cmsApiProvider)
             .resolvePlayUrl(

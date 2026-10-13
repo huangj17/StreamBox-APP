@@ -188,26 +188,16 @@ segment0.ts
     expect(health.status, SourceHealthStatus.unverified);
   });
 
-  test('Bridge 只有插件目录正常时标记待验证而非可用', () async {
+  test('retired Bridge is never contacted by health checks', () async {
     final dio = Dio()
       ..httpClientAdapter = _RoutingAdapter(
-        (_) => _jsonResponse('''{
-          "code":200,
-          "sources":[{
-            "key":"demo",
-            "name":"Demo",
-            "api":"/api/demo",
-            "kind":"jar",
-            "status":"ready"
-          }]
-        }'''),
+        (_) => throw StateError('must not request'),
       );
-    final checker = SourceHealthChecker(dio);
-
-    final health = await checker.check('https://bridge.example:9978');
-
-    expect(health.status, SourceHealthStatus.unverified);
-    expect(health.message, contains('播放待验证'));
+    final health = await SourceHealthChecker(
+      dio,
+    ).check('https://bridge.example:9978');
+    expect(health.status, SourceHealthStatus.unavailable);
+    expect(health.message, contains('已停用'));
   });
 
   test('配置文件只有站点目录正常时标记待验证而非可用', () async {

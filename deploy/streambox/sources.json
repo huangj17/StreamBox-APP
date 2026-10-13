@@ -110,26 +110,5 @@
     "url": "https://cj.rycjapi.com/api.php/provide/vod",
     "detailUrl": "https://www.ryzyw.com",
     "isEnabled": true
-  },
-  {
-    "id": "bridge_jianpian",
-    "name": "荐片视频",
-    "url": "http://1.14.171.39:9978/api/jianpian",
-    "searchable": true,
-    "isEnabled": true
-  },
-  {
-    "id": "bridge_ikanbot",
-    "name": "爱看机器人",
-    "url": "http://1.14.171.39:9978/api/ikanbot",
-    "searchable": true,
-    "isEnabled": true
-  },
-  {
-    "id": "bridge_ysj",
-    "name": "异世界动漫",
-    "url": "http://1.14.171.39:9978/api/ysj",
-    "searchable": true,
-    "isEnabled": true
   }
 ]

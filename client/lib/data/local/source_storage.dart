@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:hive/hive.dart';
 import '../../core/config/official_sources.dart';
+import '../../core/network/url_policy.dart';
 import '../models/official_source_catalog.dart';
 import '../models/site.dart';
 import '../models/source_config.dart';
@@ -65,6 +66,22 @@ class SourceStorage {
 
   Future<void> init() async {
     _box = await Hive.openBox<String>(_boxName);
+    if (_box.get('_android_jar_migrated_v1') != 'true') {
+      for (final url in getAll().where(UrlPolicy.isRetiredBridgeUrl).toList()) {
+        await remove(url);
+      }
+      final home = getHomeSite();
+      if (home != null && UrlPolicy.isRetiredBridgeUrl(home)) {
+        await _box.delete('_home_site');
+      }
+      await _box.deleteAll(
+        _box.keys
+            .whereType<String>()
+            .where((k) => k.startsWith('_bp:'))
+            .toList(),
+      );
+      await _box.put('_android_jar_migrated_v1', 'true');
+    }
   }
 
   /// 获取所有已保存的配置源 URL
@@ -112,19 +129,6 @@ class SourceStorage {
     await _box.put('_wh:$sourceUrl', warehouseUrl);
   }
 
-  /// 获取 Bridge 源上次选中的插件 key（null 表示"全部"或未记录过）
-  String? getSelectedBridgePlugin(String sourceUrl) =>
-      _box.get('_bp:$sourceUrl');
-
-  /// 保存 Bridge 源选中的插件 key；传 null 表示"全部"（清除记录）
-  Future<void> setSelectedBridgePlugin(String sourceUrl, String? key) async {
-    if (key == null) {
-      await _box.delete('_bp:$sourceUrl');
-    } else {
-      await _box.put('_bp:$sourceUrl', key);
-    }
-  }
-
   SourceConfig? getCachedConfig(String url) {
     final raw = _box.get('_config:$url');
     if (raw == null) return null;
@@ -136,6 +140,8 @@ class SourceStorage {
             .map((s) => Site.fromCache(Map<String, dynamic>.from(s as Map)))
             .toList(),
         spider: config.spider,
+        configUrl: config.configUrl ?? url,
+        options: config.options,
         lives: config.lives,
         parses: config.parses,
       );
@@ -147,6 +153,8 @@ class SourceStorage {
   Future<void> cacheConfig(String url, SourceConfig config) => _box.put(
     '_config:$url',
     jsonEncode({
+      ...config.options,
+      'configUrl': config.configUrl ?? url,
       'sites': config.sites.map((s) => s.toJson()).toList(),
       'spider': config.spider,
       'lives': config.lives

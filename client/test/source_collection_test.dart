@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
@@ -11,6 +11,7 @@ import 'package:streambox/core/theme/app_theme.dart';
 import 'package:streambox/data/local/source_storage.dart';
 import 'package:streambox/data/models/official_source_catalog.dart';
 import 'package:streambox/data/models/source_health.dart';
+import 'package:streambox/data/models/source_config.dart';
 import 'package:streambox/data/sources/source_health_checker.dart';
 import 'package:streambox/data/sources/source_parser.dart';
 import 'package:streambox/features/home/providers/categories_provider.dart';
@@ -165,6 +166,90 @@ void main() {
     expect(storage.getCachedConfig(collection), isNull);
   });
 
+  test('首次 DNS 失败保留诊断，重试成功后清除错误并保存片源', () async {
+    adapter.failure = const SocketException(
+      "Failed host lookup: 'config.example'",
+    );
+    await library.add(collection);
+    final failed = library.state.groups[collection]!;
+    expect(failed.config, isNull);
+    expect(failed.error, '加载失败：无法解析域名 config.example，请检查网络后重试');
+    expect(failed.errorDetails, contains('DioException'));
+    expect(failed.errorDetails, contains('Failed host lookup'));
+    adapter.failure = null;
+    await library.refresh(collection);
+    final loaded = library.state.groups[collection]!;
+    expect(loaded.config!.sites, hasLength(4));
+    expect(loaded.error, isNull);
+    expect(loaded.errorDetails, isNull);
+    expect(storage.getCachedConfig(collection)!.sites, hasLength(4));
+  });
+
+  testWidgets('手机添加失败仅显示一次简短提示，完整原因可查看并返回重试', (tester) async {
+    tester.view.physicalSize = const Size(320, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final loaded = await tester.runAsync(
+      () => SourceParser(dio).parse(collection),
+    );
+    final view = _AddRetryLibrary(
+      library.state,
+      storage,
+      SourceParser(dio),
+      loaded!,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sourceLibraryProvider.overrideWith((ref) => view),
+          sourceHealthProvider.overrideWith((ref) => _Health()),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(1.3)),
+            child: child!,
+          ),
+          home: const SourceManagePage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('添加配置源'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), collection);
+    await tester.ensureVisible(find.text('添加'));
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('加载失败：无法解析域名'), findsOneWidget);
+    expect(find.textContaining('DioException'), findsNothing);
+    expect(find.text('这里还没有片源'), findsNothing);
+    final details = find.byTooltip('错误详情');
+    await tester.ensureVisible(details);
+    await tester.tap(details);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Failed host lookup'), findsOneWidget);
+    expect(find.textContaining('30 分钟'), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'source-sync-details',
+    );
+    expect(find.textContaining('DioException'), findsNothing);
+    final retry = find.byKey(const ValueKey('source-refresh'));
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(find.text('光速资源'), findsOneWidget);
+    expect(find.textContaining('加载失败'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test('切首页不改变搜索范围，失败源自动回退且不重复刷新首页', () async {
     await library.add(collection);
     final health = _Health();
@@ -197,6 +282,78 @@ void main() {
       reason: '详情导航仍能找到搜索中的其他源',
     );
   });
+
+  testWidgets(
+    'desktop hides JAR before D-pad navigation and restores row focus after back',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final config = SourceConfig.fromJson({
+        'spider': './p.jar',
+        'sites': [
+          {
+            'key': 'native',
+            'name': 'Android only',
+            'type': 3,
+            'api': 'csp_Test',
+          },
+          {'key': 'desktop', 'name': 'Desktop CMS', 'type': 1, 'api': extraApi},
+        ],
+      }, configUrl: collection);
+      final initial = SourceLibrary(
+        groups: {collection: SourceGroup(url: collection, config: config)},
+      );
+      final health = _Health()..update({extraApi: SourceHealth.available()});
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sourceLibraryProvider.overrideWith(
+              (ref) => _LibraryView(initial, storage, SourceParser(dio)),
+            ),
+            sourceHealthProvider.overrideWith((ref) => health),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: const SourceManagePage(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('Desktop CMS'), findsNWidgets(2));
+      expect(find.text('Android only'), findsNothing);
+      expect(find.text('1 个片源'), findsOneWidget);
+      for (
+        var i = 0;
+        i < 8 &&
+            tester.binding.focusManager.primaryFocus?.debugLabel !=
+                'source-row-desktop';
+        i++
+      ) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      expect(
+        tester.binding.focusManager.primaryFocus?.debugLabel,
+        'source-row-desktop',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('完成'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(
+        tester.binding.focusManager.primaryFocus?.debugLabel,
+        'source-row-desktop',
+      );
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
 
   testWidgets('窄屏可切换集合和筛选异常源', (tester) async {
     await tester.runAsync(() => library.add(collection));
@@ -240,10 +397,64 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final width in [320.0, 390.0]) {
+    for (final scale in [1.0, 2.0]) {
+      testWidgets('手机首次同步失败布局 $width / 字号 $scale，更新可点击且没有重复标题', (tester) async {
+        tester.view.physicalSize = Size(width, 844);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        const initial = SourceLibrary(
+          groups: {
+            SourceStorage.officialUrl: SourceGroup(
+              url: SourceStorage.officialUrl,
+              error: '同步失败',
+            ),
+          },
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              sourceLibraryProvider.overrideWith(
+                (ref) => _LibraryView(initial, storage, SourceParser(dio)),
+              ),
+              sourceHealthProvider.overrideWith((ref) => _Health()),
+            ],
+            child: MaterialApp(
+              theme: AppTheme.dark,
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: child!,
+              ),
+              home: const SourceManagePage(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('配置源管理'), findsOneWidget);
+        expect(find.text('片源管理'), findsNothing);
+        expect(find.text('检测全部'), findsNothing);
+        expect(find.text('异常片源（0）'), findsNothing);
+        final update = find.byKey(const ValueKey('source-refresh'));
+        await tester.ensureVisible(update);
+        await tester.pumpAndSettle();
+        expect(tester.getRect(update).width, closeTo(width - 32, 0.1));
+        expect(tester.getRect(update).height, greaterThanOrEqualTo(48));
+        await tester.tap(update);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  }
 }
 
 class _Adapter implements HttpClientAdapter {
   String body = jsonEncode(fixture);
+  Object? failure;
   Completer<String>? pending;
   @override
   Future<ResponseBody> fetch(
@@ -251,6 +462,13 @@ class _Adapter implements HttpClientAdapter {
     Stream<Uint8List>? stream,
     Future<void>? cancelFuture,
   ) async {
+    if (failure != null && options.uri.toString() == collection) {
+      throw DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+        error: failure,
+      );
+    }
     return ResponseBody.fromString(
       pending == null ? body : await pending!.future,
       200,
@@ -277,4 +495,35 @@ class _LibraryView extends SourceLibraryNotifier {
   }
   @override
   Future<void> restore() async {}
+}
+
+// Widget tests exercise presentation; the notifier test above exercises real
+// parser failures, retry and storage outside Flutter's fake clock.
+class _AddRetryLibrary extends _LibraryView {
+  final SourceConfig loaded;
+  _AddRetryLibrary(super.initial, super.storage, super.parser, this.loaded);
+
+  @override
+  Future<void> add(String url) async {
+    state = state.copyWith(
+      groups: {
+        ...state.groups,
+        url: SourceGroup(
+          url: url,
+          error: '加载失败：无法解析域名 config.example，请检查网络后重试',
+          errorDetails: 'DioException: Failed host lookup: config.example',
+        ),
+      },
+    );
+  }
+
+  @override
+  Future<void> refresh(String url) async {
+    state = state.copyWith(
+      groups: {
+        ...state.groups,
+        url: SourceGroup(url: url, config: loaded),
+      },
+    );
+  }
 }
