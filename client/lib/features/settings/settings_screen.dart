@@ -15,6 +15,7 @@ import '../home/providers/categories_provider.dart';
 import '../source/source_manage_page.dart';
 import '../favorites/favorites_screen.dart';
 import '../history/history_screen.dart';
+import '../update/app_update_widgets.dart';
 part 'settings_panels.dart';
 
 /// 设置页 — 左右分栏布局

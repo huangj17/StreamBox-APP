@@ -135,10 +135,12 @@ class CmsApi {
   Future<CmsVideoDetail?> fetchVideoDetail({
     required Site site,
     required String videoId,
+    CancelToken? cancelToken,
   }) async {
     final data = await _getJson(
       site,
       queryParameters: {'ac': 'detail', 'ids': videoId},
+      cancelToken: cancelToken,
     );
     final list = data['list'] is List ? data['list'] as List : const [];
     if (list.isEmpty) return null;
@@ -196,7 +198,8 @@ class CmsApi {
   }
 
   /// 搜索
-  /// GET {api}?wd={keyword}
+  /// Request detail fields as well, so years/types can disambiguate remakes.
+  /// GET {api}?ac=detail&wd={keyword}
   Future<VideoListResult> search({
     required Site site,
     required String keyword,
@@ -204,7 +207,7 @@ class CmsApi {
   }) async {
     final data = await _getJson(
       site,
-      queryParameters: {'wd': keyword},
+      queryParameters: {'ac': 'detail', 'wd': keyword},
       cancelToken: cancelToken,
     );
     return VideoListResult.fromJson(data, siteKey: site.key);

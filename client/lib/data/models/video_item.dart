@@ -13,6 +13,12 @@ class VideoItem {
   final String? description; // 简介，来自 vod_blurb
   final String? score; // 评分，来自 vod_score
   final String siteKey;
+  final String? mediaType;
+  final String? doubanId;
+
+  /// Search-only grouping. Original site/video identities remain intact.
+  final String? aggregateKey;
+  final List<VideoItem> sources;
 
   // 仅在「继续观看」行中有值，用于续播定位
   final int? historyGroupIndex;
@@ -30,6 +36,10 @@ class VideoItem {
     this.description,
     this.score,
     required this.siteKey,
+    this.mediaType,
+    this.doubanId,
+    this.aggregateKey,
+    this.sources = const [],
     this.historyGroupIndex,
     this.historyEpisodeIndex,
     this.historyPositionMs,
@@ -49,6 +59,25 @@ class VideoItem {
     description: json['vod_blurb']?.toString(),
     score: json['vod_score']?.toString(),
     siteKey: siteKey,
+    mediaType: json['type_name']?.toString(),
+    doubanId: json['vod_douban_id']?.toString(),
+  );
+
+  VideoItem withSources(String key, List<VideoItem> items) => VideoItem(
+    id: id,
+    title: title,
+    cover: cover,
+    backdrop: backdrop,
+    year: year,
+    category: category,
+    remarks: remarks,
+    description: description,
+    score: score,
+    siteKey: siteKey,
+    mediaType: mediaType,
+    doubanId: doubanId,
+    aggregateKey: key,
+    sources: List.unmodifiable(items),
   );
 
   /// 从收藏项创建（用于收藏列表）

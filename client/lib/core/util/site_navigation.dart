@@ -41,7 +41,7 @@ Future<void> navigateToVideoDetail(
   }
 
   if (!context.mounted) return;
-  context.push(
+  await context.push(
     '/detail',
     extra: {
       'site': matched.first,

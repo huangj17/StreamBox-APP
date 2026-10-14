@@ -11,6 +11,30 @@ import 'package:streambox/features/home/providers/categories_provider.dart';
 import 'package:streambox/features/search/providers/search_provider.dart';
 
 void main() {
+  test('跨源同一影片合并，迟到的推荐不改变卡片身份', () async {
+    final api = _ControlledSearchApi();
+    final container = _container(api, const [
+      Site(key: 'slow', name: '慢源', type: 3, api: 'https://slow.example/api'),
+      Site(key: 'fast', name: '快源', type: 3, api: 'https://fast.example/api'),
+    ]);
+    addTearDown(container.dispose);
+    await container.read(searchProvider.future);
+    final running = container.read(searchProvider.notifier).search('电影');
+    api.complete('fast', year: '2026');
+    await Future<void>.delayed(Duration.zero);
+    final identity = container
+        .read(searchProvider)
+        .requireValue
+        .single
+        .aggregateKey;
+    api.complete('slow', year: '2026');
+    await running;
+    final group = container.read(searchProvider).requireValue.single;
+    expect(group.sources.map((v) => v.siteKey), ['slow', 'fast']);
+    expect(group.siteKey, 'slow');
+    expect(group.aggregateKey, identity);
+    expect(container.read(searchProgressProvider), (completed: 2, total: 2));
+  });
   test('快源先展示，慢源随后追加，保留来源身份和进度', () async {
     final api = _ControlledSearchApi();
     final container = _container(api, const [
@@ -157,9 +181,11 @@ class _ControlledSearchApi extends _FakeSearchApi {
     return (pending[site.key] = Completer<VideoListResult>()).future;
   }
 
-  void complete(String key) => pending[key]!.complete(
+  void complete(String key, {String? year}) => pending[key]!.complete(
     VideoListResult(
-      items: [VideoItem(id: '1', title: '同名电影', cover: '', siteKey: key)],
+      items: [
+        VideoItem(id: '1', title: '同名电影', cover: '', siteKey: key, year: year),
+      ],
       total: 1,
       pageCount: 1,
     ),

@@ -535,13 +535,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 query: _keyword,
                 onExit: _returnToPanel,
                 onTop: () => _queryFocus.requestFocus(),
-                onSelected: (video) => navigateToVideoDetail(
-                  context,
-                  ref,
-                  siteKey: video.siteKey,
-                  videoId: video.id,
-                  title: video.title,
-                ),
+                onSelected: (video) async {
+                  if (video.sources.length > 1) {
+                    await context.push('/aggregate-detail', extra: video);
+                  } else {
+                    await navigateToVideoDetail(
+                      context,
+                      ref,
+                      siteKey: video.siteKey,
+                      videoId: video.id,
+                      title: video.title,
+                    );
+                  }
+                  if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+                    _gridKey.currentState?.focusCurrent();
+                  }
+                },
               );
             },
           ),

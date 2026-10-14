@@ -3,6 +3,7 @@ part of 'source_manage_page.dart';
 /// One group at a time; every source has one remote-control stop.
 class _SourceGroupContents extends ConsumerStatefulWidget {
   final List<SourceGroup> groups;
+  final bool allSources;
   final bool checking;
   final VoidCallback onCheck;
   final VoidCallback onRemoved;
@@ -11,6 +12,7 @@ class _SourceGroupContents extends ConsumerStatefulWidget {
   const _SourceGroupContents({
     super.key,
     required this.groups,
+    this.allSources = false,
     required this.checking,
     required this.onCheck,
     required this.onRemoved,
@@ -58,7 +60,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       context: context,
       builder: (context) => _SourceDialog(
         title: '移除配置源？',
-        subtitle: '移除「${group.name}」及其片源，共享的官方片源会保留。',
+        subtitle: '移除「${group.name}」，其他配置仍包含的片源会保留。',
         children: [
           _SourceButton(
             label: '保留配置源',
@@ -97,13 +99,27 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       for (final site in library.allSites) site.identity: site,
     };
     final seen = <String>{};
-    final sites = widget.groups
-        .expand((group) => group.config?.sites ?? <Site>[])
-        .where((site) => site.isVisible && seen.add(site.identity))
-        .map((site) => canonical[site.identity] ?? site)
-        .toList();
-    final group = widget.groups.firstOrNull;
-    final builtIn = group == null || SourceStorage.isBuiltIn(group.url);
+    final sites = widget.allSources
+        ? library.allSites
+        : widget.groups
+              .expand((group) => group.config?.sites ?? <Site>[])
+              .where((site) => site.isVisible && seen.add(site.identity))
+              .map((site) => canonical[site.identity] ?? site)
+              .toList();
+    final group = widget.allSources
+        ? widget.groups.where((g) => SourceStorage.isBuiltIn(g.url)).firstOrNull
+        : widget.groups.firstOrNull;
+    final builtIn =
+        widget.allSources ||
+        group == null ||
+        SourceStorage.isBuiltIn(group.url);
+    final updateAll =
+        widget.allSources &&
+        widget.groups.isNotEmpty &&
+        (widget.groups.length > 1 || group == null);
+    Future<void> refresh() => updateAll
+        ? ref.read(sourceLibraryProvider.notifier).refreshAll()
+        : ref.read(sourceLibraryProvider.notifier).refresh(group!.url);
     final problems = sites
         .where(
           (site) =>
@@ -114,6 +130,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
     final visible = _showProblems ? problems : sites;
     final loading = widget.groups.any((group) => group.loading);
     final errors = widget.groups
+        .where((g) => !widget.allSources || !SourceStorage.isBuiltIn(g.url))
         .map((group) => group.error)
         .whereType<String>();
 
@@ -141,25 +158,24 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           const SizedBox(height: 8),
           Row(
             children: [
-              if (group != null)
+              if (group != null || updateAll)
                 Expanded(
                   child: _SourceButton(
                     key: const ValueKey('source-refresh'),
                     focusNode: _updateFocus,
                     label: loading
                         ? '更新中…'
-                        : group.needsInitialSync && group.error != null
+                        : updateAll
+                        ? '更新全部配置'
+                        : group!.needsInitialSync && group.error != null
                         ? '重试更新'
                         : builtIn
                         ? '更新片源'
                         : '更新配置',
                     icon: Icons.sync_rounded,
-                    primary: group.needsInitialSync && group.error != null,
-                    onActivate: loading
-                        ? null
-                        : () => ref
-                              .read(sourceLibraryProvider.notifier)
-                              .refresh(group.url),
+                    primary:
+                        group?.needsInitialSync == true && group?.error != null,
+                    onActivate: loading ? null : refresh,
                   ),
                 ),
               if (sites.isNotEmpty) ...[
@@ -206,21 +222,19 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                     icon: Icons.refresh_rounded,
                     onActivate: widget.checking ? null : widget.onCheck,
                   ),
-                  if (group != null)
+                  if (group != null || updateAll)
                     _SourceButton(
                       key: const ValueKey('source-refresh'),
                       focusNode: _updateFocus,
                       label: loading
                           ? '更新中…'
+                          : updateAll
+                          ? '更新全部配置'
                           : builtIn
                           ? '立即更新'
                           : '更新配置',
                       icon: Icons.sync_rounded,
-                      onActivate: loading
-                          ? null
-                          : () => ref
-                                .read(sourceLibraryProvider.notifier)
-                                .refresh(group.url),
+                      onActivate: loading ? null : refresh,
                     ),
                   if (!builtIn)
                     _SourceButton(
@@ -236,7 +250,8 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           const SizedBox(height: 10),
           _SourceSyncSummary(group: group),
         ],
-        if ((!builtIn && errors.isNotEmpty) || _error != null)
+        if ((errors.isNotEmpty && (widget.allSources || !builtIn)) ||
+            _error != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Text(
@@ -263,15 +278,17 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           _SiteRow(
             key: ValueKey(site.identity),
             site: site,
+            origins: library
+                .originsFor(site.identity)
+                .map((g) => g.name)
+                .toList(),
             health: health[site.api],
             home: home?.identity == site.identity,
             officiallyDisabled: library.isOfficiallyDisabled(site.identity),
             onBackToNavigation: widget.onBackToNavigation,
-            onUpToActions: site == visible.first
-                ? () => _updateFocus.requestFocus()
-                : null,
+            onUpToActions: site == visible.first ? () => _focusActions() : null,
             onRestoreFallback: () {
-              if (mounted) _updateFocus.requestFocus();
+              if (mounted) _focusActions();
             },
           ),
           const SizedBox(height: 10),
@@ -339,6 +356,14 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       ],
     );
   }
+
+  void _focusActions() {
+    if (_updateFocus.context != null) {
+      _updateFocus.requestFocus();
+    } else {
+      _filterFocus.requestFocus();
+    }
+  }
 }
 
 class _SiteRow extends StatefulWidget {
@@ -346,6 +371,7 @@ class _SiteRow extends StatefulWidget {
   final SourceHealth? health;
   final bool home;
   final bool officiallyDisabled;
+  final List<String> origins;
   final VoidCallback? onBackToNavigation;
   final VoidCallback? onUpToActions;
   final VoidCallback onRestoreFallback;
@@ -356,6 +382,7 @@ class _SiteRow extends StatefulWidget {
     required this.health,
     required this.home,
     this.officiallyDisabled = false,
+    this.origins = const [],
     required this.onRestoreFallback,
     this.onBackToNavigation,
     this.onUpToActions,
@@ -501,6 +528,13 @@ class _SiteRowState extends State<_SiteRow> {
                         ),
                       ),
                       const SizedBox(height: 6),
+                      if (widget.origins.length > 1) ...[
+                        Text(
+                          '来自 ${widget.origins.length} 份配置 · 重复已合并',
+                          style: _sourceBody(context),
+                        ),
+                        const SizedBox(height: 6),
+                      ],
                       Wrap(
                         spacing: 10,
                         runSpacing: 6,
@@ -662,6 +696,11 @@ class _SiteActionsDialogState extends ConsumerState<_SiteActionsDialog> {
                 ]),
         ),
         const SizedBox(height: 16),
+        Text(
+          '配置来源：${ref.watch(sourceLibraryProvider).originsFor(site.identity).map((g) => g.name).join('、')}',
+          style: AppTypography.body,
+        ),
+        const SizedBox(height: 8),
         const Text('首页展示一个片源，搜索汇总所有已启用片源。', style: AppTypography.body),
         if (_error != null)
           Text(

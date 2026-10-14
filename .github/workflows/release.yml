@@ -59,6 +59,14 @@ jobs:
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
+      - name: Check out current release tooling for manual rebuilds
+        if: steps.signing.outputs.configured == 'true' && github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tools
+          sparse-checkout: client/tool/generate_update_manifest.py
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-java@v5
         if: steps.signing.outputs.configured == 'true'
         with:
@@ -85,7 +93,10 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release
+          UPDATE_MANIFEST_URL: ${{ vars.STREAMBOX_UPDATE_URL }}
+        run: |
+          APP_UPDATE_URL="${UPDATE_MANIFEST_URL:-https://github.com/$GITHUB_REPOSITORY/releases/latest/download/update.json}"
+          flutter build apk --release --dart-define="STREAMBOX_UPDATE_URL=$APP_UPDATE_URL"
       - name: Verify signing certificate
         if: steps.signing.outputs.configured == 'true'
         env:
@@ -126,8 +137,37 @@ jobs:
       - name: Rename artifact
         if: steps.signing.outputs.configured == 'true'
         working-directory: ${{ github.workspace }}
-        run: mv client/build/app/outputs/flutter-apk/app-release.apk StreamBox-${{ inputs.tag || github.ref_name }}-android.apk
-      - name: Upload APK to release
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: mv client/build/app/outputs/flutter-apk/app-release.apk "StreamBox-$TAG-android.apk"
+      - name: Generate update manifest
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          ANDROID_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          # Create the release before publishing; desktop jobs may run in parallel.
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            EXTRA_FLAGS=()
+            if [[ "$TAG" == *-* ]]; then EXTRA_FLAGS+=(--prerelease); fi
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${EXTRA_FLAGS[@]}" \
+              || gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/streambox-release-notes.txt"
+          BUILD_TOOLS_VERSION="$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n 1)"
+          MANIFEST_SCRIPT=client/tool/generate_update_manifest.py
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then MANIFEST_SCRIPT=.release-tools/client/tool/generate_update_manifest.py; fi
+          python3 "$MANIFEST_SCRIPT" \
+            --apk "StreamBox-$TAG-android.apk" \
+            --aapt "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/aapt" \
+            --apksigner "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" \
+            --expected-certificate "$ANDROID_CERT_SHA256" \
+            --repository "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --notes-file "$RUNNER_TEMP/streambox-release-notes.txt" --output update.json
+      - name: Upload APK and update manifest to release
         id: publish
         if: steps.signing.outputs.configured == 'true'
         working-directory: ${{ github.workspace }}
@@ -136,7 +176,9 @@ jobs:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          # Upload the APK before publishing its new manifest metadata.
           gh release upload "$TAG" "StreamBox-$TAG-android.apk" --clobber
+          gh release upload "$TAG" update.json --clobber
           echo 'apk_uploaded=true' >> "$GITHUB_OUTPUT"
 
   gitee:

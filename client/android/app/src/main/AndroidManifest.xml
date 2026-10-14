@@ -6,6 +6,8 @@
     <!-- 播放期间保持屏幕常亮：wakelock_plus 底层需要该权限；
          酷开等 Android TV ROM 触发屏保后会直接杀掉前台 App，必须抑制屏保。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- User-confirmed self updates; APKs are verified in the private cache. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <!-- Android TV 兼容：声明对 TV 的支持，且不强制要求触摸屏（TV 没有触摸屏） -->
     <uses-feature
@@ -22,6 +24,9 @@
         android:banner="@drawable/streambox_banner"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
+        <receiver
+            android:name=".update.AppUpdateReceiver"
+            android:exported="false" />
         <service
             android:name=".spider.SpiderService"
             android:exported="false"

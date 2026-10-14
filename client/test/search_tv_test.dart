@@ -10,6 +10,7 @@ import 'package:streambox/data/cover/providers.dart';
 import 'package:streambox/data/local/search_history_storage.dart';
 import 'package:streambox/data/models/site.dart';
 import 'package:streambox/data/models/video_item.dart';
+import 'package:streambox/data/models/video_aggregation.dart';
 import 'package:streambox/features/home/providers/categories_provider.dart';
 import 'package:streambox/features/search/providers/search_provider.dart';
 import 'package:streambox/features/search/search_screen.dart';
@@ -65,6 +66,14 @@ void main() {
               builder: (_, _) => const Scaffold(body: Text('详情页')),
             ),
             GoRoute(
+              path: 'aggregate-detail',
+              builder: (_, state) => Scaffold(
+                body: Text(
+                  '聚合详情页 · ${(state.extra as VideoItem).sources.length} 个片源',
+                ),
+              ),
+            ),
+            GoRoute(
               path: 'settings',
               builder: (_, _) => const Scaffold(body: Text('片源设置')),
             ),
@@ -98,6 +107,31 @@ void main() {
     );
     await settle(tester);
   }
+
+  testWidgets('TV: 聚合卡片推荐变化保留焦点，打开和返回聚合详情恢复原卡片', (tester) async {
+    await pumpSearch(tester, initialKeyword: '测试影片');
+    final first = videos(1).single;
+    search.complete(aggregateVideos([first]));
+    await settle(tester);
+    expect(focus(), 'search-video-source-0');
+    final alternative = videos(1, site: 'other').single;
+    search.complete(
+      aggregateVideos([
+        first,
+        alternative,
+      ], compareSources: (a, b) => b.siteKey.compareTo(a.siteKey)),
+    );
+    await settle(tester);
+    expect(focus(), 'search-video-source-0');
+    expect(find.text('2026 · 2 个片源'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('聚合详情页 · 2 个片源'), findsOneWidget);
+    router.pop();
+    await settle(tester);
+    expect(focus(), 'search-video-source-0');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets(
     'TV: input starts only on OK; grid navigation reaches lazy rows and returns',

@@ -170,6 +170,57 @@ void main() {
     expect((decoration.border! as Border).top.color, Colors.white);
   }
 
+  testWidgets('TV: 全部片源默认去重，停用共享片源对所有配置生效', (tester) async {
+    library.replace(
+      SourceLibrary(
+        homeIdentity: _sites[1].identity,
+        groups: {
+          SourceStorage.officialUrl: SourceGroup(
+            url: SourceStorage.officialUrl,
+            config: SourceConfig(sites: _sites.take(2).toList()),
+          ),
+          _collection: SourceGroup(
+            url: _collection,
+            config: SourceConfig(
+              sites: [
+                _sites.first.copyWith(key: 'duplicate'),
+                ..._sites.skip(2),
+              ],
+            ),
+          ),
+        },
+      ),
+    );
+    await pumpPage(tester);
+    expect(find.text('全部片源'), findsOneWidget);
+    expect(find.text('17 个片源'), findsOneWidget);
+    expect(find.byKey(ValueKey(_sites.first.identity)), findsOneWidget);
+    expect(find.text('来自 2 份配置 · 重复已合并'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    expect(focus(), 'source-row-red');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('配置来源：官方片源、OuonnkiTV Lite'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await tester.runAsync(() async {
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+    expect(
+      library.state.activeSites.any((s) => s.identity == _sites.first.identity),
+      isFalse,
+    );
+    await key(tester, LogicalKeyboardKey.gameButtonB);
+    expect(focus(), 'source-row-red');
+    await tester.runAsync(() => library.remove(_collection));
+    await tester.pumpAndSettle();
+    expect(library.state.allSites, hasLength(2));
+    expect(find.byKey(ValueKey(_sites.first.identity)), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'TV: selecting a sidebar item keeps selection and focus together',
     (tester) async {
@@ -341,7 +392,7 @@ void main() {
       library.pendingOfficialUpdate!.complete();
       await tester.pumpAndSettle();
       expect(find.textContaining('同步失败，沿用缓存'), findsOneWidget);
-      expect(find.text('立即更新'), findsOneWidget);
+      expect(find.text('更新全部配置'), findsOneWidget);
       expect(focus(), 'source-update');
       await key(tester, LogicalKeyboardKey.escape);
       expect(focus(), 'settings-nav-source');
@@ -739,6 +790,7 @@ void main() {
       await pumpPage(tester);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
+      await key(tester, LogicalKeyboardKey.arrowRight);
       expect(focus(), 'source-action-OuonnkiTV Lite');
       await key(tester, LogicalKeyboardKey.enter);
       expect(find.text('15 个片源'), findsOneWidget);
@@ -777,14 +829,14 @@ void main() {
       await key(tester, LogicalKeyboardKey.enter);
       await tester.runAsync(() async {
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       });
       await tester.pumpAndSettle();
       expect(library.state.homeIdentity, _sites[1].identity);
       await key(tester, LogicalKeyboardKey.arrowDown);
       await tester.runAsync(() async {
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
       });
       await tester.pumpAndSettle();
       expect(
@@ -833,6 +885,7 @@ void main() {
     'TV: removing a selected collection restores the surviving group',
     (tester) async {
       await pumpPage(tester);
+      await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.enter);

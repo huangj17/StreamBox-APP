@@ -60,10 +60,7 @@ extension _PlayerPanels on _PlayerScreenState {
               selected: i == _groupIndex,
               icon: Icons.swap_horiz_rounded,
               onTap: () {
-                if (i != _groupIndex) {
-                  _switchEpisode(i, _episodeIndex.clamp(0, group.length - 1));
-                }
-                _closePanel();
+                if (i == _groupIndex || _switchSourceGroup(i)) _closePanel();
               },
             ),
           );

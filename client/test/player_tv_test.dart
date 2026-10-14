@@ -11,6 +11,7 @@ import 'package:streambox/data/local/player_settings_storage.dart';
 import 'package:streambox/data/models/episode.dart';
 import 'package:streambox/data/models/site.dart';
 import 'package:streambox/data/models/watch_history.dart';
+import 'package:streambox/data/models/playback_resume.dart';
 import 'package:streambox/features/home/providers/categories_provider.dart';
 import 'package:streambox/features/player/engine/video_engine.dart';
 import 'package:streambox/features/player/engine/video_engine_factory.dart';
@@ -20,6 +21,7 @@ import 'package:streambox/widgets/tv_button.dart';
 void main() {
   late _Engine engine;
   late GoRouter router;
+  PlaybackResume? returnedResume;
 
   setUp(() {
     final messenger =
@@ -57,8 +59,10 @@ void main() {
     double textScale = 1,
     bool ready = true,
     bool startAtDetails = false,
+    List<List<Episode>>? episodes,
   }) async {
     engine = _Engine();
+    returnedResume = null;
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     router = GoRouter(
@@ -77,7 +81,11 @@ void main() {
                           label: '继续观看',
                           autofocus: true,
                           debugLabel: 'detail-play',
-                          onActivate: () => context.push('/player'),
+                          onActivate: () async {
+                            returnedResume = await context.push<PlaybackResume>(
+                              '/player',
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -92,17 +100,22 @@ void main() {
                 site: Site.fromUrl('https://source.example/api', name: '测试片源'),
                 videoTitle: '测试影片：这是一个较长的名字',
                 cover: '',
-                episodeGroups: List.generate(
-                  groups,
-                  (g) => List.generate(
-                    count,
-                    (i) => Episode(
-                      name: '第 ${i + 1} 集',
-                      url: 'https://video.example/$g/$i.m3u8',
+                episodeGroups:
+                    episodes ??
+                    List.generate(
+                      groups,
+                      (g) => List.generate(
+                        count,
+                        (i) => Episode(
+                          name: '第 ${i + 1} 集',
+                          url: 'https://video.example/$g/$i.m3u8',
+                        ),
+                      ),
                     ),
-                  ),
+                sourceNames: List.generate(
+                  episodes?.length ?? groups,
+                  (g) => '线路 ${g + 1}',
                 ),
-                sourceNames: List.generate(groups, (g) => '线路 ${g + 1}'),
                 initialEpisodeIndex: episode,
               ),
             ),
@@ -150,6 +163,132 @@ void main() {
       await settle(tester);
     }
   }
+
+  Future<void> openSources(WidgetTester tester) async {
+    for (var i = 0; i < 6 && focus() != 'player:sources'; i++) {
+      await key(tester, LogicalKeyboardKey.arrowRight);
+    }
+    expect(focus(), 'player:sources');
+    await key(tester, LogicalKeyboardKey.select);
+  }
+
+  testWidgets('TV: 切线路按名称匹配乱序列表，打开完成后续播，返回保留待恢复进度', (tester) async {
+    await pumpPlayer(
+      tester,
+      episode: 4,
+      startAtDetails: true,
+      episodes: [
+        List.generate(
+          5,
+          (i) => Episode(
+            name: '第${i + 1}集',
+            url: 'https://video.example/origin/$i.m3u8',
+          ),
+        ),
+        [
+          const Episode(
+            name: 'EP1',
+            url: 'https://video.example/target/one.m3u8',
+          ),
+          const Episode(
+            name: 'EP005',
+            url: 'https://video.example/target/five.m3u8',
+          ),
+          const Episode(
+            name: 'EP2',
+            url: 'https://video.example/target/two.m3u8',
+          ),
+        ],
+      ],
+    );
+    await key(tester, LogicalKeyboardKey.select);
+    engine.duration.add(const Duration(minutes: 90));
+    engine.position.add(const Duration(milliseconds: 60500));
+    await settle(tester);
+    await openSources(tester);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    final opening = Completer<void>();
+    engine.pendingOpen = opening;
+    await key(tester, LogicalKeyboardKey.select);
+    expect(engine.opens.last, 'https://video.example/target/five.m3u8');
+    expect(focus(), 'player:sources');
+    engine.duration.add(const Duration(minutes: 80));
+    await settle(tester);
+    expect(engine.seeks, isEmpty, reason: '新视频尚未打开完成');
+    opening.complete();
+    await settle(tester);
+    expect(engine.seeks, [const Duration(milliseconds: 60500)]);
+    await key(tester, LogicalKeyboardKey.gameButtonB);
+    await key(tester, LogicalKeyboardKey.gameButtonB);
+    expect(returnedResume?.episodeName, 'EP005');
+    expect(returnedResume?.episodeIndex, 1);
+    expect(returnedResume?.groupIndex, 1);
+    expect(returnedResume?.positionMs, 60500);
+    expect(focus(), 'detail-play');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TV: 缺集线路不能按索引切到另一集，原线路和焦点可继续操作', (tester) async {
+    await pumpPlayer(
+      tester,
+      episode: 1,
+      episodes: [
+        [
+          const Episode(name: '第1集', url: 'https://video.example/one.m3u8'),
+          const Episode(name: '第5集', url: 'https://video.example/five.m3u8'),
+        ],
+        [
+          const Episode(name: '第1集', url: 'https://video.example/other1.m3u8'),
+          const Episode(name: '第2集', url: 'https://video.example/other2.m3u8'),
+        ],
+      ],
+    );
+    await openSources(tester);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await key(tester, LogicalKeyboardKey.select);
+    expect(engine.opens, ['https://video.example/five.m3u8']);
+    expect(find.textContaining('没有可匹配的「第5集」'), findsOneWidget);
+    expect(find.text('切换线路'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.gameButtonB);
+    expect(focus(), 'player:sources');
+    expect(engine.seeks, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('自动故障切线跳过缺集线路，并按名称续播当前进度', (tester) async {
+    await pumpPlayer(
+      tester,
+      episodes: [
+        [const Episode(name: '第05集', url: 'https://video.example/origin.m3u8')],
+        [const Episode(name: '第9集', url: 'https://video.example/wrong.m3u8')],
+        [
+          const Episode(name: 'EP2', url: 'https://video.example/two.m3u8'),
+          const Episode(name: 'EP5', url: 'https://video.example/right.m3u8'),
+        ],
+      ],
+    );
+    engine.errors.add('线路失效');
+    await settle(tester);
+    expect(engine.opens.last, 'https://video.example/right.m3u8');
+    expect(engine.opens, isNot(contains('https://video.example/wrong.m3u8')));
+    engine.duration.add(const Duration(minutes: 80));
+    await settle(tester);
+    expect(engine.seeks.last, const Duration(milliseconds: 60500));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('主动换到下一集仍从头开始，不沿用上一集进度', (tester) async {
+    await pumpPlayer(tester, count: 6, episode: 4);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(focus(), 'player:next');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(engine.opens.last, 'https://video.example/0/5.m3u8');
+    engine.duration.add(const Duration(minutes: 80));
+    await settle(tester);
+    expect(engine.seeks, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('操作栏不误快进，时间轴松键跳转，取消后松键不会提交', (tester) async {
     await pumpPlayer(tester);
@@ -435,6 +574,7 @@ class _History extends HistoryStorage {
 }
 
 class _Engine implements VideoEngine {
+  Completer<void>? pendingOpen;
   final position = StreamController<Duration>.broadcast();
   final duration = StreamController<Duration>.broadcast();
   final buffering = StreamController<bool>.broadcast();
@@ -471,6 +611,9 @@ class _Engine implements VideoEngine {
   @override
   Future<void> open(String url, {Map<String, String>? headers}) async {
     opens.add(url);
+    final pending = pendingOpen;
+    pendingOpen = null;
+    await pending?.future;
   }
 
   @override

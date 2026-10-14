@@ -13,6 +13,8 @@ import '../../data/models/site.dart';
 import '../../data/models/cms_video_detail.dart';
 import '../../data/models/episode.dart';
 import '../../data/models/favorite_item.dart';
+import '../../data/models/playback_resume.dart';
+import '../../data/models/watch_history.dart';
 import '../../widgets/letter_poster.dart';
 import '../../widgets/resolvable_cover.dart';
 import '../../widgets/tv_back_button.dart';
@@ -25,6 +27,10 @@ import 'providers/detail_provider.dart';
 class DetailScreen extends ConsumerWidget {
   final Site site;
   final String videoId;
+  final CmsVideoDetail? preloadedDetail;
+  final Widget? sourceSelector;
+  final int defaultGroupIndex;
+  final ValueChanged<PlaybackResume>? onPlaybackResumeChanged;
 
   /// 来自「继续观看」的历史线路索引（可选）
   final int? initialGroupIndex;
@@ -39,6 +45,10 @@ class DetailScreen extends ConsumerWidget {
     super.key,
     required this.site,
     required this.videoId,
+    this.preloadedDetail,
+    this.sourceSelector,
+    this.defaultGroupIndex = 0,
+    this.onPlaybackResumeChanged,
     this.initialGroupIndex,
     this.initialEpisodeIndex,
     this.initialPositionMs,
@@ -46,9 +56,9 @@ class DetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final detail = ref.watch(
-      videoDetailProvider((site: site, videoId: videoId)),
-    );
+    final detail = preloadedDetail == null
+        ? ref.watch(videoDetailProvider((site: site, videoId: videoId)))
+        : AsyncValue<CmsVideoDetail?>.data(preloadedDetail);
 
     return Scaffold(
       body: detail.when(
@@ -85,6 +95,9 @@ class DetailScreen extends ConsumerWidget {
             return const Center(child: Text('未找到'));
           }
           return _DetailContent(
+            sourceSelector: sourceSelector,
+            defaultGroupIndex: defaultGroupIndex,
+            onPlaybackResumeChanged: onPlaybackResumeChanged,
             site: site,
             vod: vod,
             initialGroupIndex: initialGroupIndex,
@@ -100,6 +113,9 @@ class DetailScreen extends ConsumerWidget {
 class _DetailContent extends ConsumerStatefulWidget {
   final Site site;
   final CmsVideoDetail vod;
+  final Widget? sourceSelector;
+  final int defaultGroupIndex;
+  final ValueChanged<PlaybackResume>? onPlaybackResumeChanged;
   final int? initialGroupIndex;
   final int? initialEpisodeIndex;
   final int? initialPositionMs;
@@ -107,6 +123,9 @@ class _DetailContent extends ConsumerStatefulWidget {
   const _DetailContent({
     required this.site,
     required this.vod,
+    this.sourceSelector,
+    this.defaultGroupIndex = 0,
+    this.onPlaybackResumeChanged,
     this.initialGroupIndex,
     this.initialEpisodeIndex,
     this.initialPositionMs,
@@ -131,23 +150,29 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
       widget.vod.vodId.toString(),
       widget.site.key,
     );
+    _resumeGroupIndex = widget.initialGroupIndex;
+    _resumeEpisodeIndex = widget.initialEpisodeIndex;
+    _resumePositionMs = widget.initialPositionMs;
 
     // 如果外部没传历史信息，自动从历史记录中查找
     if (widget.initialGroupIndex == null) {
-      final historyStorage = ref.read(historyStorageProvider);
-      final allHistory = historyStorage.getAllUnfiltered();
-      final videoId = widget.vod.vodId.toString();
-      final siteKey = widget.site.key;
-      final history = allHistory.where(
-        (h) => h.videoId == videoId && h.siteKey == siteKey,
-      );
-      if (history.isNotEmpty) {
-        final h = history.first;
-        _resumeGroupIndex = h.groupIndex;
-        _resumeEpisodeIndex = h.episodeIndex;
-        _resumePositionMs = h.positionMs;
+      final history = _savedHistory();
+      if (history != null) {
+        final match = matchingEpisodeLocation(
+          widget.vod.episodeGroups,
+          history.episodeName,
+          preferredGroupIndex: history.groupIndex,
+          playable: (ep) => canPlayEpisode(widget.site, ep),
+        );
+        if (match != null) {
+          _resumeGroupIndex = match.groupIndex;
+          _resumeEpisodeIndex = match.episodeIndex;
+          _resumePositionMs = history.positionMs;
+        }
       }
     }
+    final resume = _currentResume();
+    if (resume != null) widget.onPlaybackResumeChanged?.call(resume);
 
     // 预热播放 URL 的 DNS，节省 libmpv 起播时的解析时间
     _warmPlaybackUrl();
@@ -164,7 +189,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     if (_warmed) return;
     _warmed = true;
     try {
-      final gi = _effectiveGroupIndex ?? 0;
+      final gi = _effectiveGroupIndex ?? widget.defaultGroupIndex;
       final ei = _effectiveEpisodeIndex ?? 0;
       final groups = widget.vod.episodeGroups;
       if (gi >= groups.length) return;
@@ -180,11 +205,53 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
   }
 
   int? get _effectiveGroupIndex =>
-      widget.initialGroupIndex ?? _resumeGroupIndex;
+      _resumeGroupIndex ?? widget.initialGroupIndex;
   int? get _effectiveEpisodeIndex =>
-      widget.initialEpisodeIndex ?? _resumeEpisodeIndex;
+      _resumeEpisodeIndex ?? widget.initialEpisodeIndex;
   int? get _effectivePositionMs =>
-      widget.initialPositionMs ?? _resumePositionMs;
+      _resumePositionMs ?? widget.initialPositionMs;
+
+  WatchHistory? _savedHistory() => ref
+      .read(historyStorageProvider)
+      .getAllUnfiltered()
+      .where(
+        (h) => h.videoId == widget.vod.vodId && h.siteKey == widget.site.key,
+      )
+      .firstOrNull;
+
+  PlaybackResume? _currentResume() {
+    final groups = widget.vod.episodeGroups;
+    final playable = List.generate(groups.length, (i) => i)
+        .where((i) => groups[i].any((ep) => canPlayEpisode(widget.site, ep)))
+        .toList();
+    if (playable.isEmpty) return null;
+    final desiredGroup = _effectiveGroupIndex ?? widget.defaultGroupIndex;
+    final group = playable.contains(desiredGroup)
+        ? desiredGroup
+        : playable.first;
+    final desiredEpisode = _effectiveEpisodeIndex ?? 0;
+    final episode =
+        desiredEpisode >= 0 &&
+            desiredEpisode < groups[group].length &&
+            canPlayEpisode(widget.site, groups[group][desiredEpisode])
+        ? desiredEpisode
+        : groups[group].indexWhere((ep) => canPlayEpisode(widget.site, ep));
+    return PlaybackResume(
+      episodeName: groups[group][episode].name,
+      groupIndex: group,
+      episodeIndex: episode,
+      positionMs: _effectivePositionMs ?? 0,
+    );
+  }
+
+  void _applyResume(PlaybackResume resume) {
+    setState(() {
+      _resumeGroupIndex = resume.groupIndex;
+      _resumeEpisodeIndex = resume.episodeIndex;
+      _resumePositionMs = resume.positionMs;
+    });
+    widget.onPlaybackResumeChanged?.call(resume);
+  }
 
   void _toggleFavorite() {
     final storage = ref.read(favoriteStorageProvider);
@@ -302,7 +369,16 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     required int episodeIndex,
     int positionMs = 0,
   }) async {
-    await context.push(
+    final previousHistory = _savedHistory();
+    _applyResume(
+      PlaybackResume(
+        episodeName: groups[groupIndex][episodeIndex].name,
+        groupIndex: groupIndex,
+        episodeIndex: episodeIndex,
+        positionMs: positionMs,
+      ),
+    );
+    final resume = await context.push<PlaybackResume>(
       '/player',
       extra: {
         'videoId': widget.vod.vodId.toString(),
@@ -320,20 +396,32 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
     // 播放器返回后，刷新历史记录以便下次播放能续播
     if (!mounted) return;
-    final historyStorage = ref.read(historyStorageProvider);
-    final allHistory = historyStorage.getAllUnfiltered();
-    final videoId = widget.vod.vodId.toString();
-    final siteKey = widget.site.key;
-    final history = allHistory.where(
-      (h) => h.videoId == videoId && h.siteKey == siteKey,
-    );
-    if (history.isNotEmpty) {
-      final h = history.first;
-      setState(() {
-        _resumeGroupIndex = h.groupIndex;
-        _resumeEpisodeIndex = h.episodeIndex;
-        _resumePositionMs = h.positionMs;
-      });
+    if (resume != null) {
+      _applyResume(resume);
+      return;
+    }
+    final history = _savedHistory();
+    if (history != null &&
+        (previousHistory == null ||
+            history.updatedAt != previousHistory.updatedAt ||
+            history.episodeName != previousHistory.episodeName ||
+            history.positionMs != previousHistory.positionMs)) {
+      final match = matchingEpisodeLocation(
+        groups,
+        history.episodeName,
+        preferredGroupIndex: history.groupIndex,
+        playable: (ep) => canPlayEpisode(widget.site, ep),
+      );
+      if (match != null) {
+        _applyResume(
+          PlaybackResume(
+            episodeName: groups[match.groupIndex][match.episodeIndex].name,
+            groupIndex: match.groupIndex,
+            episodeIndex: match.episodeIndex,
+            positionMs: history.positionMs,
+          ),
+        );
+      }
     }
   }
 
@@ -420,23 +508,36 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                   final posterH = isCompact ? 150.0 : 300.0;
                   final gap = isCompact ? AppSpacing.sm : AppSpacing.lg;
 
-                  final hasPlay =
-                      groups.isNotEmpty &&
-                      groups[0].isNotEmpty &&
-                      groups[0][0].url.isNotEmpty;
+                  final playableGroups = List.generate(groups.length, (i) => i)
+                      .where(
+                        (i) => groups[i].any(
+                          (ep) => canPlayEpisode(widget.site, ep),
+                        ),
+                      )
+                      .toList();
+                  final hasPlay = playableGroups.isNotEmpty;
 
                   final resumeMs = _effectivePositionMs ?? 0;
                   final hasResume = hasPlay && resumeMs > 0;
                   final isSeries = groups.any((g) => g.length > 1);
-                  final resumeGi = hasPlay
-                      ? (_effectiveGroupIndex ?? 0).clamp(0, groups.length - 1)
-                      : 0;
-                  final resumeEi = hasPlay
-                      ? (_effectiveEpisodeIndex ?? 0).clamp(
-                          0,
-                          groups[resumeGi].length - 1,
-                        )
-                      : 0;
+                  final desiredGroup =
+                      _effectiveGroupIndex ?? widget.defaultGroupIndex;
+                  final resumeGi = playableGroups.contains(desiredGroup)
+                      ? desiredGroup
+                      : playableGroups.firstOrNull ?? 0;
+                  final desiredEpisode = _effectiveEpisodeIndex ?? 0;
+                  final resumeEi = !hasPlay
+                      ? 0
+                      : desiredEpisode < groups[resumeGi].length &&
+                            desiredEpisode >= 0 &&
+                            canPlayEpisode(
+                              widget.site,
+                              groups[resumeGi][desiredEpisode],
+                            )
+                      ? desiredEpisode
+                      : groups[resumeGi].indexWhere(
+                          (ep) => canPlayEpisode(widget.site, ep),
+                        );
                   final playLabel = hasResume
                       ? (isSeries
                             ? '继续 ${groups[resumeGi][resumeEi].name} '
@@ -461,6 +562,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                           positionMs: resumeMs,
                         ),
                       ),
+                    if (widget.sourceSelector != null) widget.sourceSelector!,
                     if (hasResume)
                       TvActionButton.secondary(
                         icon: Icons.replay,
@@ -702,7 +804,7 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
                         const SizedBox(width: AppSpacing.sm),
                     itemBuilder: (context, j) {
                       final ep = groups[i][j];
-                      final disabled = ep.url.isEmpty;
+                      final disabled = !canPlayEpisode(widget.site, ep);
                       return Center(
                         child: _EpisodeChip(
                           label: ep.name,

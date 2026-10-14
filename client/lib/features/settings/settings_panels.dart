@@ -751,6 +751,8 @@ class _AboutPanelState extends State<_AboutPanel> {
         const Divider(color: AppColors.divider),
         const SizedBox(height: AppSpacing.lg),
 
+        const AppUpdateCard(),
+
         // 缓存管理
         Text('存储', style: AppTypography.headline2),
         const SizedBox(height: AppSpacing.lg),

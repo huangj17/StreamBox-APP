@@ -40,6 +40,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
   bool _statusError = false;
   Timer? _statusTimer;
   String? _selectedGroup;
+  bool _showAll = true;
   final _addFocus = FocusNode(debugLabel: 'add-source');
   final _groupFocus = FocusNode(debugLabel: 'source-group-builtin');
 
@@ -95,10 +96,23 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
       final group = ref.read(sourceLibraryProvider).groups[url];
       setState(() {
         _selectedGroup = url;
+        _showAll = false;
         _statusMessage = null;
       });
       // A failed group already shows its error beside the retry action.
-      if (group?.error == null) _setStatus('配置源已添加');
+      if (group?.error == null) {
+        final library = ref.read(sourceLibraryProvider);
+        final imported =
+            group?.config?.sites
+                .where((s) => s.isVisible)
+                .map((s) => s.identity)
+                .toSet() ??
+            <String>{};
+        final shared = imported
+            .where((id) => library.originsFor(id).length > 1)
+            .length;
+        _setStatus('配置源已添加 · ${imported.length - shared} 个新增 · $shared 个重复已合并');
+      }
     } catch (error) {
       _setStatus('添加失败：${sourceErrorMessage(error)}', error: true);
     } finally {
@@ -118,7 +132,11 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
         .where((g) => !SourceStorage.isBuiltIn(g.url))
         .toList();
     final selected = library.groups[_selectedGroup];
-    final groups = selected == null ? builtIn : [selected];
+    final groups = _showAll
+        ? library.groups.values.toList()
+        : selected == null
+        ? builtIn
+        : [selected];
     final home = ref.watch(homeSitesProvider).firstOrNull;
     final entryFocus = widget.entryFocusNode ?? _groupFocus;
     final body = LayoutBuilder(
@@ -139,7 +157,7 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
                     children: [
                       Text('片源管理', style: AppTypography.headline1),
                       const SizedBox(height: 6),
-                      Text('选择首页内容，管理搜索范围', style: AppTypography.body),
+                      Text('重复片源已合并，选择首页内容和搜索范围', style: AppTypography.body),
                     ],
                   ),
                   _SourceButton(
@@ -171,23 +189,40 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
               child: Row(
                 children: [
                   _SourceButton(
-                    label: '官方片源',
+                    label: '全部片源',
                     icon: Icons.inventory_2_outlined,
-                    selected: selected == null,
+                    selected: _showAll,
                     focusNode: entryFocus,
                     autofocus:
                         !widget.embedded && PlatformService.needsFocusSystem,
-                    onActivate: () => setState(() => _selectedGroup = null),
+                    onActivate: () => setState(() {
+                      _showAll = true;
+                      _selectedGroup = null;
+                    }),
                   ),
+                  if (builtIn.isNotEmpty && collections.isNotEmpty) ...[
+                    const SizedBox(width: 12),
+                    _SourceButton(
+                      label: '官方片源',
+                      icon: Icons.folder_outlined,
+                      selected: !_showAll && selected == null,
+                      onActivate: () => setState(() {
+                        _showAll = false;
+                        _selectedGroup = null;
+                      }),
+                    ),
+                  ],
                   for (final group in collections) ...[
                     const SizedBox(width: 12),
                     _SourceButton(
                       key: ValueKey(group.url),
                       label: group.name,
                       icon: Icons.folder_outlined,
-                      selected: selected?.url == group.url,
-                      onActivate: () =>
-                          setState(() => _selectedGroup = group.url),
+                      selected: !_showAll && selected?.url == group.url,
+                      onActivate: () => setState(() {
+                        _showAll = false;
+                        _selectedGroup = group.url;
+                      }),
                     ),
                   ],
                 ],
@@ -197,13 +232,17 @@ class _SourceManagePageState extends ConsumerState<SourceManagePage> {
           ],
         );
         final contents = _SourceGroupContents(
-          key: ValueKey(selected?.url ?? 'builtin'),
+          key: ValueKey(_showAll ? 'all' : selected?.url ?? 'builtin'),
           groups: groups,
+          allSources: _showAll,
           checking: checking,
           onCheck: () => ref.read(sourceHealthProvider.notifier).refreshAll(),
           onRemoved: () {
             if (!mounted) return;
-            setState(() => _selectedGroup = null);
+            setState(() {
+              _selectedGroup = null;
+              _showAll = true;
+            });
             entryFocus.requestFocus();
           },
           onBackToNavigation: widget.onBackToNavigation,

@@ -20,6 +20,7 @@ import 'data/local/search_history_storage.dart';
 import 'features/source/providers/source_provider.dart';
 import 'features/source/providers/source_library_provider.dart';
 import 'features/home/providers/categories_provider.dart';
+import 'features/update/app_update_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -112,6 +113,8 @@ class _StreamBoxAppState extends ConsumerState<StreamBoxApp>
     // 触发首轮后台检测。
     ref.read(sourceHealthProvider.notifier);
     unawaited(ref.read(sourceLibraryProvider.notifier).restore());
+    // Only record update availability; never interrupt navigation or playback.
+    unawaited(ref.read(appUpdateProvider.notifier).check());
   }
 
   @override
@@ -121,6 +124,7 @@ class _StreamBoxAppState extends ConsumerState<StreamBoxApp>
         .setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
       unawaited(ref.read(sourceHealthProvider.notifier).refreshStale());
+      unawaited(ref.read(appUpdateProvider.notifier).resumed());
     }
   }
 

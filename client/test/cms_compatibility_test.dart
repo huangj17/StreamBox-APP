@@ -33,6 +33,10 @@ void main() {
     expect(page.items.single.title, '测试影片');
     expect(page.items.single.year, '2026');
 
+    final search = await api.search(site: xmlSite, keyword: '测试影片');
+    expect(search.items.single.year, '2026');
+    expect(search.items.single.id, '7');
+
     final detail = await api.fetchVideoDetail(site: xmlSite, videoId: '7');
     expect(detail, isNotNull);
     expect(detail!.vodName, '测试影片');
@@ -74,6 +78,13 @@ class _CmsXmlAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    if (options.uri.queryParameters.containsKey('wd')) {
+      expect(
+        options.uri.queryParameters['ac'],
+        'detail',
+        reason: '搜索需要年份等消歧字段',
+      );
+    }
     final body = options.uri.queryParameters['ac'] == 'class'
         ? _classesXml
         : options.uri.queryParameters.containsKey('ids')

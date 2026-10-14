@@ -1,8 +1,9 @@
 part of 'search_screen.dart';
 
 typedef _VideoIdentity = ({String site, String id});
-_VideoIdentity _videoIdentity(VideoItem video) =>
-    (site: video.siteKey, id: video.id);
+_VideoIdentity _videoIdentity(VideoItem video) => video.aggregateKey == null
+    ? (site: video.siteKey, id: video.id)
+    : (site: 'aggregate', id: video.aggregateKey!);
 
 /// Explicit row/column navigation also reaches cells outside the lazy viewport.
 /// Keys include the source so equal video IDs from different sites stay distinct.
@@ -197,7 +198,7 @@ class _SearchResultGridState extends ConsumerState<_SearchResultGrid> {
               child: Semantics(
                 button: true,
                 label:
-                    '${video.title}，${sourceNames[video.siteKey] ?? ''}，确认查看详情',
+                    '${video.title}，${video.sources.length > 1 ? '${video.sources.map((v) => v.siteKey).toSet().length} 个片源' : sourceNames[video.siteKey] ?? ''}，确认查看详情',
                 child: TvFocusable(
                   focusNode: _node(video),
                   onActivate: () => widget.onSelected(video),
@@ -287,6 +288,8 @@ class _SearchResultGridState extends ConsumerState<_SearchResultGrid> {
                                 Text(
                                   widget.query == null
                                       ? (video.year ?? '最近更新')
+                                      : video.sources.length > 1
+                                      ? '${video.year ?? ''} · ${video.sources.map((v) => v.siteKey).toSet().length} 个片源'
                                       : sourceNames[video.siteKey] ?? '未知片源',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,

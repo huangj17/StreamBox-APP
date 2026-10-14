@@ -275,7 +275,12 @@ void main() {
     expect(changes, 0);
     health.update({extraApi: SourceHealth.unavailable(message: '超时')});
     expect(container.read(homeSitesProvider).single.api, isNot(extraApi));
-    expect(container.read(searchSitesProvider), hasLength(2));
+    expect(
+      container.read(searchSitesProvider),
+      hasLength(3),
+      reason: '抽查失败只降低搜索优先级，保留具体影片的候选片源',
+    );
+    expect(container.read(searchSitesProvider).last.api, extraApi);
     expect(
       container.read(sitesProvider),
       hasLength(3),

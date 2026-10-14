@@ -14,11 +14,13 @@ import '../../core/platform/platform_service.dart';
 import '../../core/platform/network_speed_monitor.dart';
 import '../../core/network/url_policy.dart';
 import '../../data/models/episode.dart';
+import '../../data/models/playback_resume.dart';
 import '../../data/models/site.dart';
 import '../../data/models/watch_history.dart';
 import '../../data/local/history_storage.dart';
 import '../../data/local/player_settings_storage.dart';
 import '../home/providers/categories_provider.dart';
+import '../source/providers/source_playback_provider.dart';
 import 'engine/video_engine.dart';
 import 'engine/video_engine_factory.dart';
 import 'player_buffering.dart';
@@ -118,6 +120,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   late int _groupIndex;
   late int _episodeIndex;
+  DateTime? _sourceAttemptStarted;
+  bool _sourceOutcomeRecorded = false;
 
   bool _controlsVisible = true;
   bool _isFullscreen = false;
@@ -204,6 +208,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   // 续播：_resumePositionMs > 0 时，duration 确定后自动 seek
   int _resumePositionMs = 0;
+  bool _resumeSeekRequested = false;
+  bool _openingEpisode = false;
   int _playRequestId = 0;
 
   // ── 计算属性 ──
@@ -244,6 +250,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _posSub = _engine.positionStream.listen((p) {
       if (!mounted || _seeking) return;
       _position = p;
+      if (_resumeSeekRequested &&
+          (p.inMilliseconds - _resumePositionMs).abs() <= 1000) {
+        _resumePositionMs = 0;
+        _resumeSeekRequested = false;
+      }
       _publishProgressState();
       _observePlaybackProgress(p);
     });
@@ -252,12 +263,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _duration = d;
       _publishProgressState();
       // duration 只表示元数据已加载，不能据此认定首帧已渲染。
-      if (_resumePositionMs > 0 && d.inMilliseconds > 0) {
-        final target = Duration(milliseconds: _resumePositionMs);
-        _expectRecoveryAt(target);
-        _engine.seek(target);
-        _resumePositionMs = 0;
-      }
+      _tryResumePosition();
     });
     _bufSub = _engine.bufferingStream.listen((b) {
       if (!mounted) return;
@@ -311,23 +317,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (!mounted || err.isEmpty) return;
       // 自动尝试下一线路（仅多线路时触发）
       if (widget.episodeGroups.length > 1) {
-        var nextGroup = _groupIndex + 1;
-        while (nextGroup < widget.episodeGroups.length &&
-            widget.episodeGroups[nextGroup].isEmpty) {
-          nextGroup++;
-        }
-        if (nextGroup < widget.episodeGroups.length) {
-          final nextEps = widget.episodeGroups[nextGroup];
-          final epIdx = _episodeIndex.clamp(0, nextEps.length - 1);
-          if (nextEps[epIdx].url.isNotEmpty) {
-            setState(() {
-              _groupIndex = nextGroup;
-              _episodeIndex = epIdx;
-              _error = null;
-            });
-            _playCurrentEpisode();
-            return;
-          }
+        for (
+          var nextGroup = _groupIndex + 1;
+          nextGroup < widget.episodeGroups.length;
+          nextGroup++
+        ) {
+          if (_switchSourceGroup(nextGroup, automatic: true)) return;
         }
       }
       // 延迟显示错误：给底层 1.5s 自恢复；若 position 继续推进，
@@ -542,6 +537,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _confirmPlaybackProgress() {
+    _recordSourceOutcome(true);
     _progressEvidence.disarm();
     _stuckTimer?.cancel();
     _stuckTimer = null;
@@ -594,6 +590,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     var url = episode.url;
     var headers = episode.headers;
     if (url.isEmpty) return;
+    _openingEpisode = true;
+    _resumeSeekRequested = false;
+    _sourceAttemptStarted = DateTime.now();
+    _sourceOutcomeRecorded = false;
     _logBufferMetrics();
     _bufferMetrics.reset(DateTime.now());
     _errorTimer?.cancel();
@@ -624,12 +624,30 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
       url = UrlPolicy.requirePlaybackUrl(url).toString();
       await _engine.open(url, headers: headers);
+      if (!mounted || requestId != _playRequestId) return;
+      _openingEpisode = false;
+      _tryResumePosition();
     } catch (error) {
       if (!mounted || requestId != _playRequestId) return;
+      _openingEpisode = false;
       _disarmStuckTimer();
       _setBuffering(false);
       _setError('播放地址解析失败：$error');
     }
+  }
+
+  void _tryResumePosition() {
+    if (_openingEpisode ||
+        _resumePositionMs <= 0 ||
+        _resumeSeekRequested ||
+        _duration <= Duration.zero) {
+      return;
+    }
+    _resumePositionMs = _resumePositionMs.clamp(0, _duration.inMilliseconds);
+    _resumeSeekRequested = true;
+    final target = Duration(milliseconds: _resumePositionMs);
+    _expectRecoveryAt(target);
+    _engine.seek(target);
   }
 
   void _logBufferMetrics() {
@@ -640,6 +658,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void _switchEpisode(int groupIndex, int episodeIndex) {
     _saveHistory();
     _resumePositionMs = 0;
+    _resumeSeekRequested = false;
     setState(() {
       _groupIndex = groupIndex;
       _episodeIndex = episodeIndex;
@@ -648,7 +667,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _showControls();
   }
 
+  PlaybackResume get _playbackResume => PlaybackResume(
+    episodeName: _current.name,
+    groupIndex: _groupIndex,
+    episodeIndex: _episodeIndex,
+    positionMs: _resumePositionMs > 0
+        ? _resumePositionMs
+        : _position.inMilliseconds,
+  );
+
+  bool _switchSourceGroup(int groupIndex, {bool automatic = false}) {
+    final episodeIndex = matchingEpisodeIndex(
+      widget.episodeGroups[groupIndex],
+      _current.name,
+      playable: (ep) => canPlayEpisode(widget.site, ep),
+    );
+    if (episodeIndex == null) {
+      if (!automatic) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('该线路没有可匹配的「${_current.name}」，已保留当前线路')),
+        );
+      }
+      return false;
+    }
+    final positionMs = _playbackResume.positionMs;
+    _saveHistory();
+    if (automatic) _recordSourceOutcome(false);
+    _resumePositionMs = positionMs;
+    _resumeSeekRequested = false;
+    setState(() {
+      _groupIndex = groupIndex;
+      _episodeIndex = episodeIndex;
+      _error = null;
+    });
+    _playCurrentEpisode();
+    if (!automatic) _showControls();
+    return true;
+  }
+
   void _seekTo(Duration position) {
+    _resumePositionMs = 0;
+    _resumeSeekRequested = false;
     if (_playing) {
       _buffered = position;
       _publishProgressState();
@@ -703,6 +762,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _setError(String message) {
+    _recordSourceOutcome(false);
     _hideTimer?.cancel();
     setState(() {
       _error = message;
@@ -712,6 +772,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _controlsVisible = true;
     });
     _restoreControlsFocus();
+  }
+
+  void _recordSourceOutcome(bool succeeded) {
+    if (_sourceOutcomeRecorded || _sourceAttemptStarted == null) return;
+    _sourceOutcomeRecorded = true;
+    ref
+        .read(sourcePlaybackProvider.notifier)
+        .record(
+          widget.site,
+          succeeded: succeeded,
+          startupMs: succeeded
+              ? DateTime.now().difference(_sourceAttemptStarted!).inMilliseconds
+              : null,
+        );
   }
 
   void _showControls({bool focus = false}) {
@@ -833,7 +907,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _hideTimer?.cancel();
     setState(() => _allowExit = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && context.canPop()) context.pop();
+      if (mounted && context.canPop()) context.pop(_playbackResume);
     });
   }
 
@@ -881,7 +955,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         episodeName: _current.name,
         episodeIndex: _episodeIndex,
         groupIndex: _groupIndex,
-        positionMs: _position.inMilliseconds,
+        positionMs: _playbackResume.positionMs,
         durationMs: _duration.inMilliseconds,
         updatedAt: DateTime.now(),
         category: widget.category,
