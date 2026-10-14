@@ -18,6 +18,7 @@ import '../../../data/models/favorite_item.dart';
 import '../../../data/models/source_health.dart';
 import '../../source/providers/source_library_provider.dart';
 import '../../source/providers/source_provider.dart';
+import '../../source/providers/source_playback_provider.dart';
 
 // ── 基础设施 Provider ──
 
@@ -46,17 +47,21 @@ final sitesProvider = Provider<List<Site>>((ref) {
   return ref.read(sourceLibraryProvider).activeSites;
 });
 
-/// 导航保留所有启用站点，搜索暂时跳过已明确检测失败的站点。
+/// 搜索保留所有已启用站点；检测失败只降级，抽查不代表所有影片失效。
 final searchSitesProvider = Provider<List<Site>>((ref) {
   final health = ref.watch(sourceHealthProvider);
-  return ref
-      .watch(sitesProvider)
-      .where(
-        (s) =>
-            s.searchable &&
-            health[s.api]?.status != SourceHealthStatus.unavailable,
-      )
-      .toList();
+  final playback = ref.watch(sourcePlaybackProvider);
+  final sites = ref.watch(sitesProvider).where((s) => s.searchable).toList();
+  final order = {for (var i = 0; i < sites.length; i++) sites[i].key: i};
+  sites.sort((a, b) {
+    final score = sourceRecommendationScore(
+      b,
+      health,
+      playback,
+    ).compareTo(sourceRecommendationScore(a, health, playback));
+    return score != 0 ? score : order[a.key]!.compareTo(order[b.key]!);
+  });
+  return sites;
 });
 
 /// 首页只请求一个站点；当前源异常时优先使用检测通过的备用源。

@@ -9,13 +9,21 @@ import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.streambox.streambox.update.AppUpdateInstaller
 
 class MainActivity : FlutterActivity() {
+    private var updates: AppUpdateInstaller? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         if (!flutterEngine.plugins.has(com.streambox.streambox.spider.AndroidSpiderPlugin::class.java)) {
             flutterEngine.plugins.add(com.streambox.streambox.spider.AndroidSpiderPlugin())
         }
+
+        updates?.close()
+        updates = AppUpdateInstaller(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.streambox/updates")
+            .setMethodCallHandler { call, result -> updates?.handle(call, result) ?: result.notImplemented() }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -52,5 +60,21 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updates?.onResume()
+    }
+
+    override fun onPause() {
+        updates?.onPause()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        updates?.close()
+        updates = null
+        super.onDestroy()
     }
 }

@@ -95,6 +95,13 @@ class SourceLibrary {
   List<Site> get activeSites =>
       allSites.where((s) => s.isEnabled && s.isSupported).toList();
 
+  List<SourceGroup> originsFor(String identity) => groups.values
+      .where(
+        (group) =>
+            group.config?.sites.any((s) => s.identity == identity) ?? false,
+      )
+      .toList();
+
   bool isOfficiallyDisabled(String identity) =>
       groups[SourceStorage.officialUrl]?.config?.sites.any(
         (site) => site.identity == identity && !site.isEnabled,

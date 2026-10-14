@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/models/video_item.dart';
 import '../../../data/models/site.dart';
 import '../../../data/models/video_list_result.dart';
+import '../../../data/models/video_aggregation.dart';
 import '../../home/providers/categories_provider.dart';
 
 /// 搜索结果状态（AsyncNotifier，支持跨源聚合）
@@ -56,6 +57,16 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
         total: eligibleSites.length,
       );
       final items = <VideoItem>[];
+      final sourceOrder = {
+        for (var i = 0; i < eligibleSites.length; i++) eligibleSites[i].key: i,
+      };
+      List<VideoItem> aggregated() => aggregateVideos(
+        items,
+        compareSources: (a, b) =>
+            (sourceOrder[a.siteKey] ?? eligibleSites.length).compareTo(
+              sourceOrder[b.siteKey] ?? eligibleSites.length,
+            ),
+      );
       var nextIndex = 0;
       var completed = 0;
       Future<void> worker() async {
@@ -90,7 +101,7 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
             total: eligibleSites.length,
           );
           if (items.isNotEmpty) {
-            state = AsyncValue.data(List.unmodifiable(items));
+            state = AsyncValue.data(aggregated());
           }
         }
       }
@@ -99,7 +110,7 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
         List.generate(eligibleSites.length.clamp(0, 4), (_) => worker()),
       );
       if (_disposed || generation != _generation) return;
-      state = AsyncValue.data(List.unmodifiable(items));
+      state = AsyncValue.data(aggregated());
     } catch (error, stackTrace) {
       if (generation != _generation) return;
       if (!_disposed && generation == _generation) {

@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 import '../../data/models/site.dart';
 import '../../data/models/category.dart';
 import '../../data/models/episode.dart';
+import '../../data/models/video_item.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/home/category_detail_screen.dart';
 import '../../features/detail/detail_screen.dart';
+import '../../features/detail/aggregate_detail_screen.dart';
 import '../../features/player/player_screen.dart';
 import '../../features/search/search_screen.dart';
 import '../../features/source/source_manage_page.dart';
@@ -38,6 +40,13 @@ final appRouter = GoRouter(
           state,
         );
       },
+    ),
+    GoRoute(
+      path: '/aggregate-detail',
+      pageBuilder: (context, state) => _buildPage(
+        AggregateDetailScreen(video: state.extra as VideoItem),
+        state,
+      ),
     ),
     GoRoute(
       path: '/player',

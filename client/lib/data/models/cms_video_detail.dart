@@ -20,6 +20,8 @@ class CmsVideoDetail {
   final String? vodActor;
   final String? vodScore;
   final String? vodDoubanScore;
+  final String? vodDoubanId;
+  final String? mediaType;
 
   CmsVideoDetail({
     required this.vodId,
@@ -39,6 +41,8 @@ class CmsVideoDetail {
     this.vodActor,
     this.vodScore,
     this.vodDoubanScore,
+    this.vodDoubanId,
+    this.mediaType,
   });
 
   factory CmsVideoDetail.fromJson(
@@ -63,6 +67,8 @@ class CmsVideoDetail {
       vodActor: json['vod_actor']?.toString(),
       vodScore: json['vod_score']?.toString(),
       vodDoubanScore: json['vod_douban_score']?.toString(),
+      vodDoubanId: json['vod_douban_id']?.toString(),
+      mediaType: json['type_name']?.toString(),
     );
   }
 
