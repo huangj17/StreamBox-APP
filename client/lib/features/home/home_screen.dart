@@ -209,6 +209,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         selectedIndex: 0,
                         firstItemFocusNode: _sideNavFirstFocus,
                         onItemSelected: (index) {
+                          if (index == 1) context.push('/live');
                           if (index == 2) context.push('/search');
                           if (index == 3) context.push('/settings');
                         },
@@ -231,8 +232,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ? BottomNavigationBar(
                 currentIndex: 0,
                 onTap: (index) {
-                  if (index == 1) context.push('/search');
-                  if (index == 2) context.push('/settings');
+                  if (index == 1) context.push('/live');
+                  if (index == 2) context.push('/search');
+                  if (index == 3) context.push('/settings');
                 },
                 type: BottomNavigationBarType.fixed,
                 backgroundColor: AppColors.deepBlack,
@@ -242,6 +244,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 unselectedFontSize: 12,
                 items: const [
                   BottomNavigationBarItem(icon: Icon(Icons.home), label: '首页'),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.live_tv),
+                    label: '直播',
+                  ),
                   BottomNavigationBarItem(
                     icon: Icon(Icons.search),
                     label: '搜索',

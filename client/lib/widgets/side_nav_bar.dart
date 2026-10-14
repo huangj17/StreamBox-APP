@@ -35,7 +35,7 @@ class SideNavBar extends StatefulWidget {
 
   static const _items = <_NavItemSpec>[
     _NavItemSpec(label: '首页', icon: Icons.home_rounded, enabled: true),
-    _NavItemSpec(label: '直播', icon: Icons.live_tv_rounded, enabled: false),
+    _NavItemSpec(label: '直播', icon: Icons.live_tv_rounded, enabled: true),
     _NavItemSpec(label: '搜索', icon: Icons.search_rounded, enabled: true),
     _NavItemSpec(label: '设置', icon: Icons.settings_rounded, enabled: true),
   ];

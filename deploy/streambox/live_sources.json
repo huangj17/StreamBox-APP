@@ -1,0 +1,29 @@
+[
+  {
+    "id": "guovin-ipv4",
+    "name": "Guovin IPTV · IPv4",
+    "url": "https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/ipv4/result.m3u",
+    "isEnabled": true,
+    "fallbackUrls": [
+      "https://cdn.jsdelivr.net/gh/Guovin/iptv-api@gd/output/ipv4/result.m3u"
+    ]
+  },
+  {
+    "id": "ngo5-ipv4",
+    "name": "ngo5 IPTV · IPv4",
+    "url": "https://raw.githubusercontent.com/ngo5/IPTV/main/m3u/ipv4.m3u",
+    "isEnabled": true,
+    "fallbackUrls": [
+      "https://cdn.jsdelivr.net/gh/ngo5/IPTV@main/m3u/ipv4.m3u"
+    ]
+  },
+  {
+    "id": "ngo5-ipv6",
+    "name": "ngo5 IPTV · IPv6",
+    "url": "https://raw.githubusercontent.com/ngo5/IPTV/main/m3u/ipv6.m3u",
+    "isEnabled": true,
+    "fallbackUrls": [
+      "https://cdn.jsdelivr.net/gh/ngo5/IPTV@main/m3u/ipv6.m3u"
+    ]
+  }
+]
