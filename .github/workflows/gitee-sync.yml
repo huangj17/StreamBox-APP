@@ -1,0 +1,103 @@
+name: Sync to Gitee
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_call:
+    inputs:
+      tag:
+        description: GitHub Release tag whose APK should be copied
+        required: true
+        type: string
+    secrets:
+      GITEE_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '补同步已有 Release 的 APK；留空仅同步代码'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitee-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GITEE_REPOSITORY: huangj17/StreamBox-APP
+      GITEE_USERNAME: huangj17
+    steps:
+      - name: Check Gitee configuration
+        id: config
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if [ -n "$GITEE_TOKEN" ]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo '::warning::GITEE_TOKEN is missing. See docs/gitee-sync.md.'
+            echo 'Gitee sync skipped: add repository secret GITEE_TOKEN (see docs/gitee-sync.md).' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.config.outputs.configured == 'true'
+        with:
+          # Use current tooling even when rebuilding an older release tag.
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Synchronize branches and tags
+        if: steps.config.outputs.configured == 'true'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+          ASKPASS="$RUNNER_TEMP/gitee-askpass.sh"
+          cat > "$ASKPASS" <<'SH'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' "$GITEE_USERNAME" ;;
+            *Password*) printf '%s\n' "$GITEE_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$ASKPASS"
+          trap 'rm -f "$ASKPASS"' EXIT
+          git fetch --no-tags origin \
+            '+refs/heads/*:refs/gitee-sync/heads/*' \
+            '+refs/tags/*:refs/gitee-sync/tags/*'
+          # Never overwrite divergent Gitee history or delete Gitee-only refs.
+          GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 \
+            git push "https://gitee.com/$GITEE_REPOSITORY.git" \
+              'refs/gitee-sync/heads/*:refs/heads/*' \
+              'refs/gitee-sync/tags/*:refs/tags/*'
+      - name: Download GitHub APK and release metadata
+        if: steps.config.outputs.configured == 'true' && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gitee-release"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,body,isPrerelease,isDraft,targetCommitish,url \
+            > "$RUNNER_TEMP/gitee-release/release.json"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.apk' --dir "$RUNNER_TEMP/gitee-release" --clobber
+      - name: Publish APK to Gitee Release
+        if: steps.config.outputs.configured == 'true' && inputs.tag != ''
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: python3 client/tool/sync_gitee_release.py --directory "$RUNNER_TEMP/gitee-release"

@@ -22,6 +22,8 @@ jobs:
   android:
     name: Android APK
     runs-on: ubuntu-latest
+    outputs:
+      apk_uploaded: ${{ steps.publish.outputs.apk_uploaded }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -126,12 +128,26 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: mv client/build/app/outputs/flutter-apk/app-release.apk StreamBox-${{ inputs.tag || github.ref_name }}-android.apk
       - name: Upload APK to release
+        id: publish
         if: steps.signing.outputs.configured == 'true'
         working-directory: ${{ github.workspace }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" "StreamBox-$TAG-android.apk" --clobber
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "StreamBox-$TAG-android.apk" --clobber
+          echo 'apk_uploaded=true' >> "$GITHUB_OUTPUT"
+
+  gitee:
+    name: Gitee code and APK
+    needs: android
+    if: needs.android.outputs.apk_uploaded == 'true'
+    uses: ./.github/workflows/gitee-sync.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+    secrets:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
   macos:
     name: macOS App
