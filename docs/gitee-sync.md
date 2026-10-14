@@ -7,6 +7,8 @@ GitHub 为主仓库，Gitee 目标为 `huangj17/StreamBox-APP`。
   APK、标题、说明、预发布标记发布到 Gitee Release。桌面构建失败不影响此步骤。
 - 手动补构建已有 tag 的 Android APK，也会触发同步。
 - APK 直接复制 GitHub 已构建的文件，不重新打包或签名。
+- 附件通过 Ubuntu runner 自带的 curl 流式上传；连接超时 30 秒，总时限 10 分钟，
+  连续 60 秒低于 1 KB/s 时中止并报告错误。令牌通过标准输入传入，不写入文件或命令参数。
 
 ## 首次设置
 
