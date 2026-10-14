@@ -45,7 +45,7 @@ CMS 搜索请求详情字段以补充年份等消歧信息。
 Android TV / Android 手机支持在「设置 → 关于 → 软件更新」检查、下载并安装 APK 更新。
 启动检查不会弹窗打断播放；更新说明、取消、重试和授权返回均支持遥控器。
 Release 发布时自动生成并上传 `update.json`。部署、版本规则和实机验收见
-[Android 在线升级](../docs/android-updates.md)。
+[Android 在线升级](ANDROID_UPDATES.md)。
 
 ## 预览
 
