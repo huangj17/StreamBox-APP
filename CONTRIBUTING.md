@@ -74,6 +74,18 @@ Repository secrets；缺失、配置不完整或证书指纹不匹配时，发�
 gh workflow run release.yml -f tag=v0.3.0
 ```
 
+### Android 在线升级
+
+Android Release 会同时生成 `update.json`，用于应用内在线升级。发布前递增
+`client/pubspec.yaml` 中的 `versionCode`，标签须与 APK 版本名匹配；操作及镜像部署见
+[Android 在线升级](docs/android-updates.md)。
+
+### Gitee 代码与 APK 镜像
+
+GitHub CI 成功后同步代码，Android Release 发布后复制 APK 到 Gitee。
+维护者需配置 `GITEE_TOKEN` Repository secret；首次设置、手动补传与同步范围见
+[Gitee 同步配置](docs/gitee-sync.md)。
+
 ## 行为准则
 
 保持友善与尊重。技术讨论对事不对人，不接受人身攻击或歧视性言论。
