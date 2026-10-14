@@ -17,6 +17,8 @@ import 'data/local/history_storage.dart';
 import 'data/local/favorite_storage.dart';
 import 'data/local/player_settings_storage.dart';
 import 'data/local/search_history_storage.dart';
+import 'data/local/live_storage.dart';
+import 'features/live/providers/live_provider.dart';
 import 'features/source/providers/source_provider.dart';
 import 'features/source/providers/source_library_provider.dart';
 import 'features/home/providers/categories_provider.dart';
@@ -64,6 +66,7 @@ void main() async {
   final searchHistoryStorage = SearchHistoryStorage();
   final appSettingsStorage = AppSettingsStorage();
   final coverCache = CoverCache();
+  final liveStorage = LiveStorage();
 
   await Future.wait([
     sourceStorage.init(),
@@ -73,6 +76,7 @@ void main() async {
     searchHistoryStorage.init(),
     appSettingsStorage.init(),
     coverCache.init(),
+    liveStorage.init(),
   ]);
 
   // 限制内存中图片缓存（默认 100MB / 1000 张，降至 50MB / 200 张以控制内存）
@@ -90,6 +94,7 @@ void main() async {
         searchHistoryStorageProvider.overrideWithValue(searchHistoryStorage),
         appSettingsStorageProvider.overrideWithValue(appSettingsStorage),
         coverCacheProvider.overrideWithValue(coverCache),
+        liveStorageProvider.overrideWithValue(liveStorage),
       ],
       child: const StreamBoxApp(),
     ),
@@ -109,20 +114,30 @@ class _StreamBoxAppState extends ConsumerState<StreamBoxApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // 提前实例化健康检测 Provider；片源从 Hive 恢复后会自动
-    // 触发首轮后台检测。
-    ref.read(sourceHealthProvider.notifier);
-    unawaited(ref.read(sourceLibraryProvider.notifier).restore());
-    // Only record update availability; never interrupt navigation or playback.
-    unawaited(ref.read(appUpdateProvider.notifier).check());
+    // Startup work changes notifier state synchronously. Wait until the root
+    // ProviderScope has mounted before starting foreground work.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 片源从 Hive 恢复后自动触发首轮后台健康检测。
+      ref.read(sourceHealthProvider.notifier);
+      unawaited(ref.read(sourceLibraryProvider.notifier).restore());
+      ref.read(liveProvider.notifier).setForeground(true);
+      unawaited(ref.read(liveProvider.notifier).syncCatalog(force: true));
+      // Only record update availability; never interrupt navigation or playback.
+      unawaited(ref.read(appUpdateProvider.notifier).check());
+    });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     ref
+        .read(liveProvider.notifier)
+        .setForeground(state == AppLifecycleState.resumed);
+    ref
         .read(sourceLibraryProvider.notifier)
         .setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(liveProvider.notifier).syncCatalog());
       unawaited(ref.read(sourceHealthProvider.notifier).refreshStale());
       unawaited(ref.read(appUpdateProvider.notifier).resumed());
     }

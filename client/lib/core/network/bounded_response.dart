@@ -29,6 +29,7 @@ Future<String> getBoundedText(
   String url, {
   Map<String, dynamic>? queryParameters,
   Map<String, dynamic>? headers,
+  Map<String, dynamic>? extra,
   Duration? sendTimeout,
   Duration? receiveTimeout,
   CancelToken? cancelToken,
@@ -41,6 +42,7 @@ Future<String> getBoundedText(
     url,
     queryParameters: queryParameters,
     headers: headers,
+    extra: extra,
     sendTimeout: sendTimeout,
     receiveTimeout: receiveTimeout,
     cancelToken: cancelToken,
@@ -60,6 +62,7 @@ Future<BoundedTextResponse> getBoundedTextResponse(
   String url, {
   Map<String, dynamic>? queryParameters,
   Map<String, dynamic>? headers,
+  Map<String, dynamic>? extra,
   Duration? sendTimeout,
   Duration? receiveTimeout,
   CancelToken? cancelToken,
@@ -80,6 +83,7 @@ Future<BoundedTextResponse> getBoundedTextResponse(
       options: Options(
         responseType: ResponseType.stream,
         headers: currentHeaders,
+        extra: extra,
         sendTimeout: sendTimeout,
         receiveTimeout: receiveTimeout,
         followRedirects: !manualRedirects,

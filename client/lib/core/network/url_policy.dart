@@ -1,5 +1,6 @@
 import 'dart:io';
 import '../config/official_sources.dart';
+import '../config/live_sources.dart';
 
 /// Untrusted configuration and CMS responses must not select arbitrary local
 /// files/protocol handlers or literal private-network endpoints.
@@ -22,6 +23,29 @@ class UrlPolicy {
         _isPrivateLiteral(uri.host) ||
         _isLoopbackHost(uri.host)) {
       throw const FormatException('官方配置只允许访问指定服务器的配置文件');
+    }
+    return uri;
+  }
+
+  /// The configured live JSON endpoint has its own pinned HTTP exception.
+  /// M3U subscriptions and mirrors still use [requireConfigUrl].
+  static Uri requireLiveConfigUrl(String raw) {
+    if (raw.length > 2048) throw const FormatException('直播配置地址过长');
+    final uri = _parse(raw);
+    final configured = _parse(LiveSources.url);
+    final exact = uri == configured;
+    final httpsUpgrade =
+        configured.scheme == 'http' &&
+        uri.scheme == 'https' &&
+        uri.port == 443 &&
+        uri.host == configured.host &&
+        uri.path == configured.path &&
+        uri.query == configured.query;
+    if ((!exact && !httpsUpgrade) ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        _isPrivateLiteral(uri.host) ||
+        _isLoopbackHost(uri.host)) {
+      throw const FormatException('直播配置只允许访问指定服务器的配置文件');
     }
     return uri;
   }

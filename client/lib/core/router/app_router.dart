@@ -16,11 +16,22 @@ import '../../features/source/source_manage_page.dart';
 import '../../features/settings/settings_screen.dart';
 import '../../features/favorites/favorites_screen.dart';
 import '../../features/history/history_screen.dart';
+import '../../features/live/live_screen.dart';
+import '../../features/live/live_subscriptions_screen.dart';
 
 /// StreamBox 路由配置
 final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
+    GoRoute(
+      path: '/live',
+      pageBuilder: (_, state) => _buildPage(const LiveScreen(), state),
+    ),
+    GoRoute(
+      path: '/live/subscriptions',
+      pageBuilder: (_, state) =>
+          _buildPage(const LiveSubscriptionsScreen(), state),
+    ),
     GoRoute(
       path: '/',
       pageBuilder: (context, state) => _buildPage(const HomeScreen(), state),

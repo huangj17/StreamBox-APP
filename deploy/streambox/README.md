@@ -84,3 +84,9 @@ JAR 站点由 Android 本机 TVBox 配置提供，不放进这个 CMS-only 官�
 需要使用其他配置入口时，可在构建时设置 `--dart-define=STREAMBOX_SOURCES_URL=https://你的域名/streambox/sources.json`，并为已安装版本安排地址迁移。日常修改片源本身不需要更改配置 URL 或重新安装客户端。
 
 部署是否成功，以服务器该 URL 实际返回 HTTP 200 和有效 JSON 为准。
+
+## 独立直播配置
+
+直播订阅使用同目录的 [`live_sources.json`](live_sources.json)，与此点播文件分别更新。
+客户端读取 `http://1.14.171.39/streambox/live_sources.json`；字段、校验和上传步骤见
+[`LIVE_SOURCES.md`](LIVE_SOURCES.md)。

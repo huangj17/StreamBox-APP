@@ -3,6 +3,22 @@
 本文件记录 StreamBox 各版本的主要变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，
 完整发布产物见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
 
+## [v0.6.0] — 2026-10-14
+
+### 基础直播
+
+- 新增直播入口、M3U 订阅、频道分组和遥控器切台；进入直播直接全屏播放，重启后恢复上次成功观看的订阅、频道及线路。
+- 确认键或左键打开分组频道面板，上下键直接切台；正常播放时控制栏自动收起，订阅管理与刷新收进独立直播设置。
+- 同名频道的多个地址合并为备用线路；播放失败或连接、缓冲超过 25 秒时自动依次尝试，全部失败后才提示，支持手动选择线路和重试。
+- 预置订阅从独立的 `http://1.14.171.39/streambox/live_sources.json` 加载，包含 Guovin IPv4 与 ngo5 IPv4／IPv6。支持后台同步、手动更新和频道缓存，保留用户订阅、移除偏好及观看记录。
+- 直播 JSON 的 HTTP 访问限定指定入口，逐跳校验重定向；M3U 和下载镜像仍要求公开 HTTPS。EPG 节目单后续实现。
+
+### 修复与验证
+
+- 修复启动同步在根组件构建期间修改状态导致的红屏，首次同步安排在首帧之后。
+- 静态分析及 292 项 Flutter 测试通过，macOS 和 Android debug 构建通过。
+- macOS 实际验证远程配置加载、清单刷新、CCTV-2／3／6 播放、频道恢复和自动备用切线；TV 实机仍待验收。ngo5 视频抽检在当前网络连接失败，清单可加载不代表全部频道可播。
+
 ## [v0.5.0] — 2026-10-14
 
 ### 聚合搜索与播放
@@ -155,6 +171,7 @@
 - 技术栈：Flutter + Riverpod + media_kit / Kotlin + Ktor + Gradle
 - 许可：MIT，仅供技术研究学习，使用者自行确保片源合法合规
 
+[v0.6.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.3.0
