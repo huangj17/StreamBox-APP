@@ -3,6 +3,27 @@
 本文件记录 StreamBox 各版本的主要变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，
 完整发布产物见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
 
+## [v0.5.0] — 2026-10-14
+
+### 聚合搜索与播放
+
+- 同一作品的搜索结果合并展示，按年份、类型及可靠作品 ID 区分重拍和不同季数，保留各站点身份。
+- 聚合详情优先加载用户选中的首页片源，其他候选后台加载；支持遥控器手动切源、失败重试与推荐参考，后台结果不抢焦点。
+- 跨片源和线路切换时按集数名称匹配，保留当前播放进度；目标缺少对应集数时保留原选择并提示。
+- 片源列表按接口身份去重，统一管理共享站点的启用状态，移除一份配置仍保留其他配置引用的站点。
+
+### Android 在线升级
+
+- 设置新增软件更新入口，支持版本检查、更新说明、下载进度、取消重试、安装授权和系统安装。
+- 检查和安装前校验包名、版本、大小、SHA-256、签名及设备架构；更新窗口支持遥控器操作和焦点恢复。
+- Release 自动生成 `update.json`，沿用原正式签名，Android 构建号递增为 5。
+
+### 发布与架构
+
+- GitHub CI 成功后同步代码到 Gitee，Android 发布成功后同步 APK 与版本说明；附件改为流式上传并增加超时诊断。
+- 全平台直接访问 CMS，Android 在本机运行 JAR/DEX Spider；移除独立 JVM 后端，其他平台隐藏 JAR 站点。
+- 本次 TV 验证以自动化遥控器与焦点测试为主，尚未完成 TV 实机及各品牌系统安装界面验收。
+
 ## [v0.4.0] — 2026-09-03
 
 ### 界面与交互
@@ -134,6 +155,7 @@
 - 技术栈：Flutter + Riverpod + media_kit / Kotlin + Ktor + Gradle
 - 许可：MIT，仅供技术研究学习，使用者自行确保片源合法合规
 
+[v0.5.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.4.0
 [v0.3.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.3.0
 [v0.2.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.2.0
