@@ -1,4 +1,6 @@
 import importlib.util
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 import io
 import json
 from pathlib import Path
@@ -68,7 +70,7 @@ class GiteeReleaseTest(unittest.TestCase):
             sync.synchronize(api, self.directory)
         api.request.assert_not_called()
 
-    def test_documented_form_token_and_multipart_binary_upload(self):
+    def test_documented_form_token(self):
         api = sync.GiteeAPI("owner/repo", "private-token")
         with patch.object(sync, "urlopen") as open_request:
             open_request.return_value.__enter__.return_value.read.return_value = b'{"id": 12}'
@@ -77,12 +79,51 @@ class GiteeReleaseTest(unittest.TestCase):
             fields = parse_qs(request.data.decode())
             self.assertEqual(fields["access_token"], ["private-token"])
             self.assertEqual(fields["body"], ["发布说明"])
-            api.request("POST", "/releases/12/attach_files", file=self.apk)
-            request = open_request.call_args.args[0]
-            self.assertIn(b'name="file"', request.data)
-            self.assertIn(b"signed-apk-fixture", request.data)
-            self.assertIn(self.apk.name.encode(), request.data)
-            self.assertTrue(request.get_header("Content-type").startswith("multipart/form-data; boundary="))
+    def serve(self, handler):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        def stop():
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.addCleanup(stop)
+        return f"http://127.0.0.1:{server.server_port}"
+
+    def test_curl_sends_original_bytes_and_form_token(self):
+        received = []
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def do_POST(self):
+                received.append(self.rfile.read(int(self.headers["Content-Length"])))
+                response = b'{"id": 42}'
+                self.send_response(201)
+                self.send_header("Content-Length", str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+            def log_message(self, *args):
+                pass
+        api = sync.GiteeAPI("owner/repo", "private-token")
+        api.base = self.serve(Handler)
+        self.assertEqual(api.request("POST", "/upload", file=self.apk), {"id": 42})
+        self.assertIn(b'name="access_token"', received[0])
+        self.assertIn(b"private-token", received[0])
+        self.assertIn(b'name="file"', received[0])
+        self.assertIn(self.apk.read_bytes(), received[0])
+
+    def test_curl_handles_rejection_before_sending_file(self):
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            def handle_expect_100(self):
+                self.send_error(403, "private-token not allowed")
+                return False
+            def log_message(self, *args):
+                pass
+        api = sync.GiteeAPI("owner/repo", "private-token")
+        api.base = self.serve(Handler)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403") as caught:
+            api.request("POST", "/upload", file=self.apk)
+        self.assertNotIn("private-token", str(caught.exception))
 
     def test_http_failure_does_not_expose_token_and_only_404_means_missing(self):
         api = sync.GiteeAPI("owner/repo", "private-token")

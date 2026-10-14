@@ -7,10 +7,10 @@ import os
 from pathlib import Path
 import re
 import sys
+import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
-import uuid
 
 
 class GiteeAPI:
@@ -23,28 +23,14 @@ class GiteeAPI:
         self.token = token
 
     def request(self, method, path, fields=None, file=None, allow_missing=False):
+        if file is not None:
+            return self.upload(path, file)
         fields = {**(fields or {}), "access_token": self.token}
         url = self.base + path
         headers = {"Accept": "application/json"}
         data = None
         if method in ("GET", "DELETE"):
             url += "?" + urlencode(fields)
-        elif file is not None:
-            boundary = uuid.uuid4().hex
-            parts = []
-            for name, value in fields.items():
-                parts.append(
-                    f'--{boundary}\r\nContent-Disposition: form-data; '
-                    f'name="{name}"\r\n\r\n{value}\r\n'.encode()
-                )
-            parts.append(
-                f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
-                f'filename="{file.name}"\r\nContent-Type: '
-                'application/vnd.android.package-archive\r\n\r\n'.encode()
-            )
-            parts.extend([file.read_bytes(), f"\r\n--{boundary}--\r\n".encode()])
-            data = b"".join(parts)
-            headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
         else:
             data = urlencode(fields).encode()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
@@ -59,6 +45,32 @@ class GiteeAPI:
             raise RuntimeError(f"Gitee {method} {path.split('?')[0]} failed: HTTP {error.code}") from None
         except URLError:
             raise RuntimeError("Cannot connect to Gitee; rerun Sync to Gitee when connectivity recovers") from None
+
+    def upload(self, path, file):
+        # curl streams from disk and can read early HTTP errors during upload.
+        # Send credentials through stdin, never argv, URLs, or on-disk config.
+        config = "form-string = " + json.dumps("access_token=" + self.token) + "\n"
+        escaped_path = str(file.resolve()).replace("\\", "\\\\").replace('"', '\\"')
+        command = [
+            "curl", "--disable", "--config", "-", "--silent", "--show-error",
+            "--fail-with-body", "--connect-timeout", "30", "--max-time", "600",
+            "--speed-limit", "1024", "--speed-time", "60",
+            "--header", "Expect: 100-continue", "--expect100-timeout", "3",
+            "--form", f'file=@"{escaped_path}";type=application/vnd.android.package-archive',
+            "--write-out", "\n%{http_code}", self.base + path,
+        ]
+        print(f"Uploading {file.name} ({file.stat().st_size} bytes) to Gitee", flush=True)
+        try:
+            result = subprocess.run(command, input=config, text=True, capture_output=True, timeout=630)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("Gitee APK upload exceeded its 10-minute limit") from None
+        body, _, status = result.stdout.rpartition("\n")
+        if result.returncode or not status.startswith("2"):
+            # A service may echo credentials in its response. Redact before logging.
+            detail = (result.stderr.strip() or body[:1000]).replace(self.token, "***")
+            raise RuntimeError(f"Gitee APK upload failed: HTTP {status or 'unknown'}, "
+                               f"curl exit {result.returncode}: {detail}")
+        return json.loads(body)
 
     def attachments(self, release_id):
         items = []
