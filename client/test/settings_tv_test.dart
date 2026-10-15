@@ -170,7 +170,194 @@ void main() {
     expect((decoration.border! as Border).top.color, Colors.white);
   }
 
-  testWidgets('TV: 全部片源默认去重，停用共享片源对所有配置生效', (tester) async {
+  testWidgets('TV: 命名配置源可用遥控器逐组切换，管理后恢复片源焦点', (tester) async {
+    library.replace(
+      SourceLibrary(
+        groups: {
+          SourceStorage.officialUrl: SourceGroup(
+            url: SourceStorage.officialUrl,
+            title: '默认片源',
+            config: SourceConfig(sites: _sites.take(2).toList()),
+          ),
+          _collection: SourceGroup(
+            url: _collection,
+            title: '第三方片源',
+            config: SourceConfig(sites: _sites.skip(2).toList()),
+          ),
+        },
+      ),
+    );
+    await pumpPage(tester);
+    expect(find.text('全部片源'), findsNothing);
+    expect(find.text('默认片源'), findsOneWidget);
+    expect(find.text('第三方片源'), findsOneWidget);
+    expect(find.text('2 个片源'), findsOneWidget);
+    expect(find.text('测试片源 0'), findsNothing);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(focus(), 'source-action-默认片源');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('2 个片源'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(focus(), 'source-action-第三方片源');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('15 个片源'), findsOneWidget);
+    for (var i = 0; i < 8 && focus() != 'source-row-extra-0'; i++) {
+      await key(tester, LogicalKeyboardKey.arrowDown);
+    }
+    expect(focus(), 'source-row-extra-0');
+    expectFocusedRowVisible();
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('配置来源：第三方片源'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(focus(), 'source-row-extra-0');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(focus(), 'settings-nav-source');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('desktop: 仅含 Android 片源的配置显示平台说明，保留更新操作', (tester) async {
+    library.replace(
+      SourceLibrary(
+        groups: {
+          _collection: SourceGroup(
+            url: _collection,
+            title: '第三方片源',
+            config: SourceConfig.fromJson({
+              'spider': 'https://plugin.example/plugin.jar',
+              'sites': [
+                {
+                  'key': 'jar',
+                  'name': 'Android 片源',
+                  'api': 'csp_Test',
+                  'type': 3,
+                },
+              ],
+            }, configUrl: _collection),
+          ),
+        },
+      ),
+    );
+    await pumpPage(tester, settings: false);
+    expect(find.text('第三方片源'), findsOneWidget);
+    expect(find.text('此配置的片源仅支持 Android 手机和 Android TV'), findsOneWidget);
+    expect(find.text('0 个片源'), findsOneWidget);
+    expect(find.byKey(const ValueKey('source-refresh')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+  testWidgets('TV: 后台重排分组后保持选中组和焦点，侧栏重新进入仍回到该组', (tester) async {
+    final original = library.state.groups;
+    await pumpPage(tester);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.select);
+    library.replace(
+      library.state.copyWith(
+        groups: {
+          _collection: original[_collection]!,
+          SourceStorage.officialUrl: original[SourceStorage.officialUrl]!,
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(Focus.of(tester.element(find.text('官方片源'))).hasPrimaryFocus, isTrue);
+    expect(find.text('2 个片源'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowLeft);
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('15 个片源'), findsOneWidget);
+    library.replace(library.state.copyWith(groups: original));
+    await tester.pumpAndSettle();
+    expect(
+      Focus.of(tester.element(find.text('OuonnkiTV Lite'))).hasPrimaryFocus,
+      isTrue,
+    );
+    await key(tester, LogicalKeyboardKey.escape);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(
+      Focus.of(tester.element(find.text('OuonnkiTV Lite'))).hasPrimaryFocus,
+      isTrue,
+    );
+    library.replace(
+      library.state.copyWith(
+        groups: {
+          SourceStorage.officialUrl: original[SourceStorage.officialUrl]!,
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(Focus.of(tester.element(find.text('官方片源'))).hasPrimaryFocus, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('TV: 纯 URL 目录失败只显示错误与重试，更新后恢复配置源焦点', (tester) async {
+    library.replace(
+      SourceLibrary(
+        groups: {_collection: library.state.groups[_collection]!},
+        catalogStatus: const SourceGroup(
+          url: SourceStorage.officialUrl,
+          config: SourceConfig(sites: []),
+          error: '更新失败，保留上次成功配置',
+        ),
+      ),
+    );
+    library.pendingOfficialUpdate = Completer<void>();
+    await pumpPage(tester);
+    expect(find.text('官方片源'), findsNothing);
+    expect(find.textContaining('配置目录：更新失败'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    await key(tester, LogicalKeyboardKey.arrowUp);
+    expect(focus(), 'source-catalog-retry');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(find.text('正在更新目录…'), findsOneWidget);
+    expect(focus(), 'source-catalog-retry');
+    library.pendingOfficialUpdate!.complete();
+    await tester.pumpAndSettle();
+    expect(library.state.groups.keys, [_collection]);
+    expect(find.textContaining('配置目录：'), findsNothing);
+    expect(
+      Focus.of(tester.element(find.text('OuonnkiTV Lite'))).hasPrimaryFocus,
+      isTrue,
+    );
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(focus(), 'settings-nav-source');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final width in [320.0, 390.0]) {
+    testWidgets('手机纯 URL 目录失败可重试，放大字体无溢出：$width', (tester) async {
+      library.replace(
+        SourceLibrary(
+          groups: {_collection: library.state.groups[_collection]!},
+          catalogStatus: const SourceGroup(
+            url: SourceStorage.officialUrl,
+            config: SourceConfig(sites: []),
+            error: '更新失败，保留上次成功配置，请检查网络后重试',
+          ),
+        ),
+      );
+      await pumpPage(
+        tester,
+        settings: false,
+        size: Size(width, 844),
+        textScale: 2,
+      );
+      expect(find.text('官方片源'), findsNothing);
+      final retry = find.text('重试配置目录');
+      await tester.ensureVisible(retry);
+      await tester.pumpAndSettle();
+      await tester.tap(retry);
+      await tester.pumpAndSettle();
+      expect(library.officialUpdateRequests, 1);
+      expect(library.state.groups.keys, [_collection]);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets('TV: 默认仅显示首个配置源，停用共享片源对所有配置生效', (tester) async {
     library.replace(
       SourceLibrary(
         homeIdentity: _sites[1].identity,
@@ -192,8 +379,8 @@ void main() {
       ),
     );
     await pumpPage(tester);
-    expect(find.text('全部片源'), findsOneWidget);
-    expect(find.text('17 个片源'), findsOneWidget);
+    expect(find.text('全部片源'), findsNothing);
+    expect(find.text('2 个片源'), findsOneWidget);
     expect(find.byKey(ValueKey(_sites.first.identity)), findsOneWidget);
     expect(find.text('来自 2 份配置 · 重复已合并'), findsOneWidget);
     await key(tester, LogicalKeyboardKey.arrowRight);
@@ -284,7 +471,7 @@ void main() {
     await tester.tap(find.text('打开设置'));
     await tester.pumpAndSettle();
     await key(tester, LogicalKeyboardKey.arrowRight);
-    expect(focus(), 'source-group-builtin');
+    expect(focus(), 'source-action-官方片源');
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsNothing);
@@ -304,7 +491,7 @@ void main() {
       );
       expect(find.textContaining('HTTP 未加密'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.arrowRight);
-      expect(focus(), 'source-group-builtin');
+      expect(focus(), 'source-action-官方片源');
       await key(tester, LogicalKeyboardKey.arrowDown);
       expect(focus(), 'source-row-red');
       await key(tester, LogicalKeyboardKey.arrowDown);
@@ -392,7 +579,7 @@ void main() {
       library.pendingOfficialUpdate!.complete();
       await tester.pumpAndSettle();
       expect(find.textContaining('同步失败，沿用缓存'), findsOneWidget);
-      expect(find.text('更新全部配置'), findsOneWidget);
+      expect(find.text('立即更新'), findsOneWidget);
       expect(focus(), 'source-update');
       await key(tester, LogicalKeyboardKey.escape);
       expect(focus(), 'settings-nav-source');
@@ -424,7 +611,7 @@ void main() {
       expect(find.text('尚未获取官方片源，请选择「立即更新」'), findsOneWidget);
 
       await key(tester, LogicalKeyboardKey.arrowRight);
-      expect(focus(), 'source-group-builtin');
+      expect(focus(), 'source-action-官方片源');
       await key(tester, LogicalKeyboardKey.arrowRight);
       expect(focus(), 'source-sync-details');
       await key(tester, LogicalKeyboardKey.arrowRight);
@@ -623,12 +810,10 @@ void main() {
       );
       await pumpPage(tester, size: const Size(960, 540));
       await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.select);
       expect(find.textContaining('无法解析域名'), findsOneWidget);
       expect(find.textContaining('DioException'), findsNothing);
       await key(tester, LogicalKeyboardKey.arrowDown);
-      await key(tester, LogicalKeyboardKey.arrowLeft);
       await key(tester, LogicalKeyboardKey.arrowLeft);
       expect(focus(), 'source-sync-details');
       await key(tester, LogicalKeyboardKey.select);
@@ -790,7 +975,6 @@ void main() {
       await pumpPage(tester);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.arrowRight);
       expect(focus(), 'source-action-OuonnkiTV Lite');
       await key(tester, LogicalKeyboardKey.enter);
       expect(find.text('15 个片源'), findsOneWidget);
@@ -887,7 +1071,6 @@ void main() {
       await pumpPage(tester);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
-      await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.enter);
       await key(tester, LogicalKeyboardKey.arrowDown);
       await key(tester, LogicalKeyboardKey.arrowRight);
@@ -903,7 +1086,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(library.state.groups.containsKey(_collection), isFalse);
       expect(find.text('2 个片源'), findsOneWidget);
-      expect(focus(), 'source-group-builtin');
+      expect(focus(), 'source-action-官方片源');
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     },
@@ -925,6 +1108,49 @@ void main() {
     },
   );
 
+  testWidgets('TV: 移除最后一个配置源后焦点落到添加入口，可继续添加或返回', (tester) async {
+    library.replace(
+      SourceLibrary(
+        groups: {
+          _collection: SourceGroup(
+            url: _collection,
+            title: '唯一配置',
+            config: SourceConfig(sites: [_sites.first]),
+          ),
+        },
+      ),
+    );
+    await pumpPage(tester);
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    for (var i = 0; i < 8 && focus() != 'source-row-red'; i++) {
+      await key(tester, LogicalKeyboardKey.arrowDown);
+    }
+    expect(focus(), 'source-row-red');
+    await key(tester, LogicalKeyboardKey.arrowUp);
+    expect(focus(), 'source-update');
+    await key(tester, LogicalKeyboardKey.arrowRight);
+    expect(focus(), 'source-action-移除');
+    await key(tester, LogicalKeyboardKey.select);
+    await key(tester, LogicalKeyboardKey.arrowDown);
+    await tester.runAsync(() async {
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+    expect(library.state.groups, isEmpty);
+    expect(find.text('全部片源'), findsNothing);
+    expect(find.text('唯一配置'), findsNothing);
+    expect(focus(), 'add-source');
+    await key(tester, LogicalKeyboardKey.select);
+    expect(focus(), 'add-source-input');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(focus(), 'add-source');
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(focus(), 'settings-nav-source');
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets(
     'loading, failure and empty groups retain actions and a return path',
     (tester) async {
@@ -934,7 +1160,6 @@ void main() {
         ),
       );
       await pumpPage(tester, size: const Size(960, 540));
-      await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.arrowRight);
       await key(tester, LogicalKeyboardKey.enter);
       expect(find.text('正在加载片源…'), findsOneWidget);
@@ -1033,15 +1258,22 @@ class _Library extends SourceLibraryNotifier {
   Future<void> refresh(String url) async {
     if (url != SourceStorage.officialUrl) return super.refresh(url);
     officialUpdateRequests++;
-    final previous = state.groups[url]!;
+    final previous = state.catalogStatus ?? state.groups[url]!;
     state = state.copyWith(
-      groups: {...state.groups, url: previous.withStatus(loading: true)},
+      catalogStatus: previous.withStatus(loading: true, error: previous.error),
+      groups: {
+        ...state.groups,
+        if (state.groups.containsKey(url))
+          url: previous.withStatus(loading: true),
+      },
     );
     await pendingOfficialUpdate?.future;
     state = state.copyWith(
+      catalogStatus: previous.withStatus(error: refreshError),
       groups: {
         ...state.groups,
-        url: previous.withStatus(error: refreshError),
+        if (state.groups.containsKey(url))
+          url: previous.withStatus(error: refreshError),
       },
     );
   }

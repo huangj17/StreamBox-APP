@@ -60,7 +60,8 @@ class SourceStorage {
   static String? descOf(String url) => sourceInfo[url]?.desc;
 
   /// 判断是否为应用管理的官方订阅分组（不包含用户手动添加的相同 CMS）。
-  static bool isBuiltIn(String url) => url == officialUrl;
+  static bool isBuiltIn(String url) =>
+      url == officialUrl || url.startsWith('$officialUrl#inline-');
 
   late Box<String> _box;
 
@@ -93,6 +94,19 @@ class SourceStorage {
   Future<void> add(String url) async {
     if (getAll().contains(url)) return;
     await _box.add(url);
+  }
+
+  String? getName(String url) => _box.get('_name:$url');
+
+  /// Import remote entries just like manually added subscriptions. Remember a
+  /// deliberate removal so a periodic catalog refresh does not add it back.
+  Future<void> importCatalogSource(String url, String title) async {
+    final marker = '_catalog_imported:$url';
+    if (_box.get(marker) != '1') {
+      await add(url);
+      await _box.put(marker, '1');
+    }
+    if (getAll().contains(url)) await _box.put('_name:$url', title);
   }
 
   /// 删除配置源 URL

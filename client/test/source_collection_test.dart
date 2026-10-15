@@ -326,9 +326,6 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
       expect(find.text('Desktop CMS'), findsNWidgets(2));
       expect(find.text('Android only'), findsNothing);
       expect(find.text('1 个片源'), findsOneWidget);

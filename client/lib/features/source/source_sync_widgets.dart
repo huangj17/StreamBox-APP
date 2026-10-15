@@ -96,14 +96,15 @@ class _SourceSyncDetailsState extends ConsumerState<_SourceSyncDetails> {
   @override
   Widget build(BuildContext context) {
     final group = ref.watch(sourceLibraryProvider).groups[widget.url];
-    final official = widget.url == SourceStorage.officialUrl;
+    final official = SourceStorage.isBuiltIn(widget.url);
     final info = [
       if (official) ...[
         '配置版本：${group?.version ?? '—'}',
         '上次同步：${_sourceSyncTime(group?.syncedAt)}',
         '前台每 30 分钟检查，也可选择「立即更新」。',
       ],
-      '配置地址：${widget.url}',
+      if (official) '配置源：${group?.name ?? '官方片源'}',
+      '配置地址：${official ? SourceStorage.officialUrl : widget.url}',
       if (Uri.parse(widget.url).scheme == 'http')
         'HTTP 明文传输，存在被篡改风险，建议服务器启用 HTTPS。',
       if (group?.error != null) '错误详情：\n${group!.errorDetails ?? group.error}',

@@ -1,35 +1,37 @@
-import 'dart:convert';
 import 'dart:io';
-import 'package:streambox/data/models/official_source_catalog.dart';
 
 /// Run from client/: dart run tool/validate_sources.dart ../deploy/streambox/sources.json
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   if (args.length != 1) {
     stderr.writeln('用法：dart run tool/validate_sources.dart <sources.json>');
     exitCode = 64;
     return;
   }
+  // Site uses Flutter platform detection. Run the real parser in the Flutter
+  // test runtime so this command also works when dart:ui is required.
+  final flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  final executable = Platform.isWindows ? 'flutter.bat' : 'flutter';
+  final flutter = flutterRoot == null
+      ? executable
+      : '$flutterRoot${Platform.pathSeparator}bin${Platform.pathSeparator}$executable';
   try {
-    final file = File(args.single);
-    if (file.lengthSync() > 256 * 1024) {
-      throw const FormatException('配置文件不能超过 256 KiB');
-    }
-    final raw = jsonDecode(file.readAsStringSync());
-    final catalog = OfficialSourceCatalog.fromJson(raw);
-    stdout.writeln(
-      '有效配置：${catalog.version}，${catalog.config.sites.length} 个片源',
+    final process = await Process.start(
+      flutter,
+      [
+        'test',
+        '--no-pub',
+        '--reporter',
+        'expanded',
+        'tool/validate_sources_test.dart',
+      ],
+      environment: {
+        'STREAMBOX_VALIDATE_SOURCES_PATH': File(args.single).absolute.path,
+      },
+      mode: ProcessStartMode.inheritStdio,
     );
-    for (final site in catalog.config.sites) {
-      stdout.writeln(
-        '${!site.isSupported
-            ? '暂不兼容（不会请求）'
-            : site.isEnabled
-            ? '启用'
-            : '停用'} · ${site.name} · ${site.api}',
-      );
-    }
-  } catch (error) {
-    stderr.writeln('校验失败：$error');
-    exitCode = 1;
+    exitCode = await process.exitCode;
+  } on ProcessException catch (error) {
+    stderr.writeln('无法启动 Flutter 校验：$error');
+    exitCode = 69;
   }
 }

@@ -2,8 +2,7 @@ part of 'source_manage_page.dart';
 
 /// One group at a time; every source has one remote-control stop.
 class _SourceGroupContents extends ConsumerStatefulWidget {
-  final List<SourceGroup> groups;
-  final bool allSources;
+  final SourceGroup? group;
   final bool checking;
   final VoidCallback onCheck;
   final VoidCallback onRemoved;
@@ -11,8 +10,7 @@ class _SourceGroupContents extends ConsumerStatefulWidget {
 
   const _SourceGroupContents({
     super.key,
-    required this.groups,
-    this.allSources = false,
+    required this.group,
     required this.checking,
     required this.onCheck,
     required this.onRemoved,
@@ -99,27 +97,14 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
       for (final site in library.allSites) site.identity: site,
     };
     final seen = <String>{};
-    final sites = widget.allSources
-        ? library.allSites
-        : widget.groups
-              .expand((group) => group.config?.sites ?? <Site>[])
-              .where((site) => site.isVisible && seen.add(site.identity))
-              .map((site) => canonical[site.identity] ?? site)
-              .toList();
-    final group = widget.allSources
-        ? widget.groups.where((g) => SourceStorage.isBuiltIn(g.url)).firstOrNull
-        : widget.groups.firstOrNull;
-    final builtIn =
-        widget.allSources ||
-        group == null ||
-        SourceStorage.isBuiltIn(group.url);
-    final updateAll =
-        widget.allSources &&
-        widget.groups.isNotEmpty &&
-        (widget.groups.length > 1 || group == null);
-    Future<void> refresh() => updateAll
-        ? ref.read(sourceLibraryProvider.notifier).refreshAll()
-        : ref.read(sourceLibraryProvider.notifier).refresh(group!.url);
+    final group = widget.group;
+    final sites = (group?.config?.sites ?? <Site>[])
+        .where((site) => site.isVisible && seen.add(site.identity))
+        .map((site) => canonical[site.identity] ?? site)
+        .toList();
+    final builtIn = group == null || SourceStorage.isBuiltIn(group.url);
+    Future<void> refresh() =>
+        ref.read(sourceLibraryProvider.notifier).refresh(group!.url);
     final problems = sites
         .where(
           (site) =>
@@ -128,11 +113,10 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
         )
         .toList();
     final visible = _showProblems ? problems : sites;
-    final loading = widget.groups.any((group) => group.loading);
-    final errors = widget.groups
-        .where((g) => !widget.allSources || !SourceStorage.isBuiltIn(g.url))
-        .map((group) => group.error)
-        .whereType<String>();
+    final androidOnly =
+        !Site.supportsAndroidJar &&
+        (group?.config?.sites.any((site) => site.isJar) ?? false);
+    final loading = group?.loading ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -158,23 +142,20 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           const SizedBox(height: 8),
           Row(
             children: [
-              if (group != null || updateAll)
+              if (group != null)
                 Expanded(
                   child: _SourceButton(
                     key: const ValueKey('source-refresh'),
                     focusNode: _updateFocus,
                     label: loading
                         ? '更新中…'
-                        : updateAll
-                        ? '更新全部配置'
-                        : group!.needsInitialSync && group.error != null
+                        : group.needsInitialSync && group.error != null
                         ? '重试更新'
                         : builtIn
                         ? '更新片源'
                         : '更新配置',
                     icon: Icons.sync_rounded,
-                    primary:
-                        group?.needsInitialSync == true && group?.error != null,
+                    primary: group.needsInitialSync && group.error != null,
                     onActivate: loading ? null : refresh,
                   ),
                 ),
@@ -222,14 +203,12 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                     icon: Icons.refresh_rounded,
                     onActivate: widget.checking ? null : widget.onCheck,
                   ),
-                  if (group != null || updateAll)
+                  if (group != null)
                     _SourceButton(
                       key: const ValueKey('source-refresh'),
                       focusNode: _updateFocus,
                       label: loading
                           ? '更新中…'
-                          : updateAll
-                          ? '更新全部配置'
                           : builtIn
                           ? '立即更新'
                           : '更新配置',
@@ -250,12 +229,11 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
           const SizedBox(height: 10),
           _SourceSyncSummary(group: group),
         ],
-        if ((errors.isNotEmpty && (widget.allSources || !builtIn)) ||
-            _error != null)
+        if ((!builtIn && group.error != null) || _error != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: Text(
-              _error ?? errors.join('\n'),
+              _error ?? group!.error!,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: _sourceBody(context).copyWith(color: AppColors.warning),
@@ -296,7 +274,7 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
         if (visible.isEmpty &&
             (builtIn ||
                 loading ||
-                errors.isEmpty ||
+                group.error == null ||
                 group.warehouses.isNotEmpty))
           Container(
             padding: EdgeInsets.symmetric(
@@ -324,6 +302,8 @@ class _SourceGroupContentsState extends ConsumerState<_SourceGroupContents> {
                       ? '没有异常片源'
                       : group?.warehouses.isNotEmpty == true
                       ? '选择一个仓库，查看其中的片源'
+                      : androidOnly
+                      ? '此配置的片源仅支持 Android 手机和 Android TV'
                       : group?.needsInitialSync == true
                       ? compact
                             ? group?.error != null
