@@ -3,6 +3,21 @@
 本文件记录 StreamBox 各版本的主要变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，
 完整发布产物见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
 
+## [v0.7.0] — 2026-10-15
+
+### 配置源独立管理
+
+- 官方配置支持 `title/data` 分组，顶层每一项都是独立配置源，可使用内嵌 CMS 列表或远程订阅地址。
+- 片源管理只展示实际配置源，移除「全部片源」分组；默认片源与第三方片源分别同步、管理，搜索继续合并重复站点。
+- 配置重新排序后保留首页片源、启用偏好、当前选择和遥控器焦点；兼容迁移旧版缓存。
+- 配置目录与第三方订阅独立刷新和重试；目录加载失败时显示单独错误，不再生成多余的「官方片源」分组。
+- 非 Android 平台对仅包含 JAR 站点的订阅显示兼容性说明；Android TV 和手机继续使用本机插件宿主。
+
+### 验证
+
+- 静态分析、316 项 Flutter 测试和官方配置校验通过，新增分组身份、异步刷新及遥控器焦点回归测试。
+- Android 构建号递增为 7；TV 交互已通过键盘与组件测试，尚未完成 TV 实机验收。
+
 ## [v0.6.0] — 2026-10-14
 
 ### 基础直播
@@ -171,6 +186,7 @@
 - 技术栈：Flutter + Riverpod + media_kit / Kotlin + Ktor + Gradle
 - 许可：MIT，仅供技术研究学习，使用者自行确保片源合法合规
 
+[v0.7.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.7.0
 [v0.6.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.5.0
 [v0.4.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.4.0
