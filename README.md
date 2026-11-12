@@ -2,6 +2,18 @@
 
 Netflix 风格的跨平台流媒体播放器，对接 TVBox 生态片源。以电视、电视盒子和投影仪的遥控器操作为优先，同时适配桌面键鼠与手机触摸。全平台直接使用 CMS 接口；Android TV 和 Android 手机还可在本机运行 JAR/DEX Spider 插件，无需独立后端。
 
+## 下载
+
+当前版本 **v0.7.1**（[更新内容](CHANGELOG.md#v071--2026-11-12)）：
+
+| 平台 | 安装包 | 说明 |
+| --- | --- | --- |
+| Android TV / Android 手机 | [StreamBox-v0.7.1-android.apk](https://github.com/huangj17/StreamBox-APP/releases/download/v0.7.1/StreamBox-v0.7.1-android.apk) | 安装后可在「设置 → 关于 → 软件更新」在线升级 |
+| Windows | [StreamBox-v0.7.1-windows.zip](https://github.com/huangj17/StreamBox-APP/releases/download/v0.7.1/StreamBox-v0.7.1-windows.zip) | 解压后运行 `streambox.exe` |
+| macOS | [StreamBox-v0.7.1-macos.zip](https://github.com/huangj17/StreamBox-APP/releases/download/v0.7.1/StreamBox-v0.7.1-macos.zip) | 未经 Apple 公证，首次打开被拦截时，在「系统设置 → 隐私与安全性」中选择「仍要打开」 |
+
+历史版本见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
+
 ## 页面与交互
 
 - **沉浸首页**：侧边导航、轮播推荐、继续观看和分类内容行；首页片源统一在设置中选择，顶部不再占用一整行。
