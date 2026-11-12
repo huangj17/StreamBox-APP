@@ -3,6 +3,19 @@
 本文件记录 StreamBox 各版本的主要变更。版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，
 完整发布产物见 [Releases](https://github.com/huangj17/StreamBox-APP/releases)。
 
+## [v0.7.1] — 2026-11-12
+
+### 搜索修复
+
+- 搜索结果改为逐个片源增量聚合，标题只归一化一次，首批结果立即显示，后续更新最多每 250ms 刷新一次，片源多时不再卡住界面（[#7](https://github.com/huangj17/StreamBox-APP/issues/7)）。
+- 离开搜索页时取消进行中的搜索请求。
+- 修复 4K 等按 960×540 逻辑分辨率渲染的电视上，搜索结果只排 2 列、卡片超出屏幕导致看不到标题；现在会按可视区高度增加列数，确保整张卡片完整显示（[#8](https://github.com/huangj17/StreamBox-APP/issues/8)）。
+
+### 验证
+
+- 静态分析和 322 项 Flutter 测试通过，新增 960×540 与 1280×720 下搜索卡片完整可见的回归测试。
+- Android 构建号递增为 8；TV 布局已通过组件测试验证，尚未完成 TV 实机验收。
+
 ## [v0.7.0] — 2026-10-15
 
 ### 配置源独立管理
@@ -186,6 +199,7 @@
 - 技术栈：Flutter + Riverpod + media_kit / Kotlin + Ktor + Gradle
 - 许可：MIT，仅供技术研究学习，使用者自行确保片源合法合规
 
+[v0.7.1]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.7.1
 [v0.7.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.7.0
 [v0.6.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.6.0
 [v0.5.0]: https://github.com/huangj17/StreamBox-APP/releases/tag/v0.5.0
