@@ -76,6 +76,7 @@ jobs:
         if: steps.signing.outputs.configured == 'true'
         with:
           channel: stable
+          flutter-version: 3.47.5
           cache: true
       - run: flutter pub get
         if: steps.signing.outputs.configured == 'true'
@@ -200,6 +201,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.5
           cache: true
       - run: flutter pub get
       - run: flutter build macos --release
@@ -221,6 +223,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.5
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
