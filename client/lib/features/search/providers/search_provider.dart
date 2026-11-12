@@ -9,14 +9,21 @@ import '../../../data/models/video_aggregation.dart';
 import '../../home/providers/categories_provider.dart';
 
 /// 搜索结果状态（AsyncNotifier，支持跨源聚合）
-class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
+///
+/// autoDispose：离开搜索页即取消进行中的请求；详情页压在搜索页之上时仍保留。
+class SearchNotifier extends AutoDisposeAsyncNotifier<List<VideoItem>> {
   static const _perSiteBudget = Duration(seconds: 4);
+  static const _publishInterval = Duration(milliseconds: 250);
   int _generation = 0;
   List<CancelToken> _activeTokens = [];
   bool _disposed = false;
+  Timer? _publishTimer;
+  final _sincePublish = Stopwatch();
 
   @override
   Future<List<VideoItem>> build() async {
+    // Progress is only meaningful while this search exists.
+    ref.listen(searchProgressProvider, (_, _) {});
     ref.onDispose(() {
       _disposed = true;
       _cancelActiveSearch();
@@ -56,12 +63,10 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
         completed: 0,
         total: eligibleSites.length,
       );
-      final items = <VideoItem>[];
       final sourceOrder = {
         for (var i = 0; i < eligibleSites.length; i++) eligibleSites[i].key: i,
       };
-      List<VideoItem> aggregated() => aggregateVideos(
-        items,
+      final aggregator = VideoAggregator(
         compareSources: (a, b) =>
             (sourceOrder[a.siteKey] ?? eligibleSites.length).compareTo(
               sourceOrder[b.siteKey] ?? eligibleSites.length,
@@ -91,7 +96,7 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
                   },
                 );
             if (_disposed || generation != _generation) return;
-            items.addAll(result.items);
+            aggregator.addAll(result.items);
           } catch (_) {
             if (_disposed || generation != _generation) return;
           }
@@ -100,9 +105,7 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
             completed: completed,
             total: eligibleSites.length,
           );
-          if (items.isNotEmpty) {
-            state = AsyncValue.data(aggregated());
-          }
+          if (!aggregator.isEmpty) _schedulePublish(aggregator, generation);
         }
       }
 
@@ -110,7 +113,8 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
         List.generate(eligibleSites.length.clamp(0, 4), (_) => worker()),
       );
       if (_disposed || generation != _generation) return;
-      state = AsyncValue.data(aggregated());
+      _publishTimer?.cancel();
+      state = AsyncValue.data(aggregator.snapshot());
     } catch (error, stackTrace) {
       if (generation != _generation) return;
       if (!_disposed && generation == _generation) {
@@ -135,7 +139,32 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
     state = const AsyncValue.data([]);
   }
 
+  /// First results appear immediately; later sources are coalesced so the
+  /// result grid is not rebuilt once per completed site.
+  void _schedulePublish(VideoAggregator aggregator, int generation) {
+    if (_publishTimer?.isActive ?? false) return;
+    void publish() {
+      if (_disposed || generation != _generation) return;
+      _sincePublish
+        ..reset()
+        ..start();
+      state = AsyncValue.data(aggregator.snapshot());
+    }
+
+    final elapsed = _sincePublish.elapsed;
+    if (!_sincePublish.isRunning || elapsed >= _publishInterval) {
+      publish();
+    } else {
+      _publishTimer = Timer(_publishInterval - elapsed, publish);
+    }
+  }
+
   void _cancelActiveSearch() {
+    _publishTimer?.cancel();
+    _publishTimer = null;
+    _sincePublish
+      ..stop()
+      ..reset();
     for (final token in _activeTokens) {
       if (!token.isCancelled) token.cancel('搜索请求已被替换');
     }
@@ -143,13 +172,15 @@ class SearchNotifier extends AsyncNotifier<List<VideoItem>> {
   }
 }
 
-final searchProgressProvider = StateProvider<({int completed, int total})>(
-  (ref) => (completed: 0, total: 0),
-);
+final searchProgressProvider =
+    StateProvider.autoDispose<({int completed, int total})>(
+      (ref) => (completed: 0, total: 0),
+    );
 
-final searchProvider = AsyncNotifierProvider<SearchNotifier, List<VideoItem>>(
-  SearchNotifier.new,
-);
+final searchProvider =
+    AsyncNotifierProvider.autoDispose<SearchNotifier, List<VideoItem>>(
+      SearchNotifier.new,
+    );
 
 /// 搜索历史关键词列表
 final searchHistoryProvider = Provider<List<String>>((ref) {
