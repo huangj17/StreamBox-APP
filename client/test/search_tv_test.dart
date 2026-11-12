@@ -314,6 +314,33 @@ void main() {
     },
   );
 
+  for (final size in const [Size(960, 540), Size(1280, 720)]) {
+    testWidgets('TV: whole result card and title fit the grid at $size', (
+      tester,
+    ) async {
+      await pumpSearch(tester, size: size, initialKeyword: '测试影片');
+      search.complete(videos(20));
+      await settle(tester);
+      final grid = tester.getRect(
+        find.byKey(const ValueKey('search-result-grid')),
+      );
+      final title = tester.getRect(find.text('测试影片 0'));
+      expect(title.bottom, lessThanOrEqualTo(grid.bottom));
+      expect(focus(), 'search-video-source-0');
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      final focused = tester.getRect(
+        find.byWidgetPredicate(
+          (w) => w is Focus && w.focusNode?.debugLabel == focus(),
+        ),
+      );
+      expect(focused.top, greaterThanOrEqualTo(grid.top));
+      expect(focused.bottom, lessThanOrEqualTo(grid.bottom));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
   for (final size in [
     const Size(320, 640),
     const Size(390, 844),

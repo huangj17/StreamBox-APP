@@ -161,14 +161,28 @@ class _SearchResultGridState extends ConsumerState<_SearchResultGrid> {
         final width = constraints.maxWidth - 8;
         const gap = 16.0;
         const minCardWidth = 200.0;
-        _columns = ((width + gap) / (minCardWidth + gap)).floor().clamp(2, 6);
-        final cardWidth = (width - gap * (_columns - 1)) / _columns;
+        const minFittedCardWidth = 120.0;
+        const maxColumns = 6;
         final scale = MediaQuery.textScalerOf(context);
-        final height =
-            (cardWidth - 4) * 1.5 +
-            scale.scale(18) * 2.6 +
-            scale.scale(15) * 1.4 +
-            24;
+        final infoHeight = scale.scale(18) * 2.6 + scale.scale(15) * 1.4 + 24;
+        double cardWidthFor(int columns) =>
+            (width - gap * (columns - 1)) / columns;
+        double heightFor(int columns) =>
+            (cardWidthFor(columns) - 4) * 1.5 + infoHeight;
+        _columns = ((width + gap) / (minCardWidth + gap)).floor().clamp(
+          2,
+          maxColumns,
+        );
+        // A whole card, title included, must fit the viewport on short TV
+        // layouts (960x540 logical), otherwise the title is never visible.
+        final viewportHeight = constraints.maxHeight - 24;
+        while (viewportHeight.isFinite &&
+            _columns < maxColumns &&
+            heightFor(_columns) > viewportHeight &&
+            cardWidthFor(_columns + 1) >= minFittedCardWidth) {
+          _columns++;
+        }
+        final height = heightFor(_columns);
         _rowExtent = height + gap;
         return GridView.builder(
           key: const ValueKey('search-result-grid'),
